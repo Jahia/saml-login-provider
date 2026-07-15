@@ -21,7 +21,7 @@
         (/home.connect.saml) instead of the Jahia login page on configured
         hosts, and points the logout button to a public landing page so logout
         is not immediately cancelled by a silent SAML re-login. Ships a React
-        administration UI (Site Administration) backed by GraphQL.
+        administration UI (Server Administration) backed by GraphQL.
     </description>
     <scm>
         <connection>scm:git:git@github.com:Jahia/saml-login-provider.git</connection>
@@ -31,7 +31,7 @@
     </scm>
 
     <properties>
-        <jahia-depends>default,siteSettings,graphql-dxm-provider</jahia-depends>
+        <jahia-depends>default,serverSettings,graphql-dxm-provider</jahia-depends>
         <yarn.arguments>build:production</yarn.arguments>
     </properties>
 

@@ -8,13 +8,12 @@ import org.osgi.service.component.annotations.Modified;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
-import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 /**
  * Replaces the Jahia login page with the SAML connect endpoint provided by the
@@ -97,11 +96,9 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     public void activate(Map<String, ?> properties) {
         Object value = properties.get(FQDN_PROPERTY);
         String configured = value == null ? "" : value.toString();
-        hosts.set(Collections.unmodifiableSet(Arrays.stream(configured.split(","))
-                .map(String::trim)
-                .filter(host -> !host.isEmpty())
-                .map(host -> host.toLowerCase(Locale.ROOT))
-                .collect(Collectors.toSet())));
+        // Reuse HostList's parsing (comma-split/trim/filter/lowercase) rather than
+        // duplicating it here, so the two call sites can never drift apart.
+        hosts.set(Collections.unmodifiableSet(new HashSet<>(HostList.parse(configured))));
     }
 
     @Override

@@ -1,5 +1,4 @@
 import React, {useEffect, useState} from 'react';
-import PropTypes from 'prop-types';
 import {useMutation, useQuery} from '@apollo/client';
 import {useTranslation} from 'react-i18next';
 import {Button, Field, Input} from '@jahia/moonstone';
@@ -23,7 +22,7 @@ const isValidHostList = value => value
         HOST_PATTERN.test(host) &&
         host.split('.').every(label => label.length <= MAX_LABEL_LENGTH));
 
-export const SamlLoginProviderSettings = ({siteKey}) => {
+export const SamlLoginProviderSettings = () => {
     const {t} = useTranslation('saml-login-provider');
 
     const [fqdn, setFqdn] = useState('');
@@ -31,27 +30,28 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
     // Status is one of: null, 'saving', 'success', 'error', 'cancel'
     const [saveStatus, setSaveStatus] = useState(null);
 
-    // Update page title for the SPA route — siteKey disambiguates multiple open tabs
+    // Update page title for the SPA route — this setting is server-wide, so there is
+    // no site to disambiguate between multiple open tabs.
     useEffect(() => {
         const prev = document.title;
-        document.title = `SAML auto-login — ${siteKey} — Jahia Administration`;
+        document.title = 'SAML auto-login — Jahia Administration';
         return () => {
             document.title = prev;
         };
-    }, [siteKey]);
+    }, []);
 
     const {data: configData, loading: configLoading, error: configError} = useQuery(
         GET_SAML_LOGIN_PROVIDER_CONFIG,
-        {variables: {siteKey}, fetchPolicy: 'network-only'}
+        {fetchPolicy: 'network-only'}
     );
 
     const [updateConfig, {loading: saving}] = useMutation(UPDATE_SAML_LOGIN_PROVIDER_CONFIG, {
-        refetchQueries: [{query: GET_SAML_LOGIN_PROVIDER_CONFIG, variables: {siteKey}}]
+        refetchQueries: [{query: GET_SAML_LOGIN_PROVIDER_CONFIG}]
     });
 
     useEffect(() => {
-        if (configData && configData.samlLoginProviderConfig) {
-            setFqdn(configData.samlLoginProviderConfig.fqdn || '');
+        if (configData && configData.samlLoginProvider) {
+            setFqdn(configData.samlLoginProvider.config.fqdn || '');
         }
     }, [configData]);
 
@@ -66,9 +66,9 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
         // 'saving' clears both live regions before the result lands, ensuring re-announcement on repeated saves
         setSaveStatus('saving');
         try {
-            const result = await updateConfig({variables: {siteKey, fqdn}});
-            if (result.data && result.data.updateSamlLoginProviderConfig) {
-                setFqdn(result.data.updateSamlLoginProviderConfig.fqdn || '');
+            const result = await updateConfig({variables: {fqdn}});
+            if (result.data && result.data.samlLoginProvider) {
+                setFqdn(result.data.samlLoginProvider.update.fqdn || '');
                 setSaveStatus('success');
             } else {
                 setSaveStatus('error');
@@ -79,8 +79,8 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
     };
 
     const handleCancel = () => {
-        if (configData && configData.samlLoginProviderConfig) {
-            setFqdn(configData.samlLoginProviderConfig.fqdn || '');
+        if (configData && configData.samlLoginProvider) {
+            setFqdn(configData.samlLoginProvider.config.fqdn || '');
         }
 
         setFqdnError('');
@@ -110,7 +110,7 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
             </div>
 
             <div className={styles.slp_page_header}>
-                <h2>{t('label.menu_entry')} - {siteKey}</h2>
+                <h2>{t('label.menu_entry')}</h2>
             </div>
             <div className={styles.slp_container}>
                 <div className={styles.slp_intro}>
@@ -174,10 +174,6 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
             </div>
         </div>
     );
-};
-
-SamlLoginProviderSettings.propTypes = {
-    siteKey: PropTypes.string.isRequired
 };
 
 export default SamlLoginProviderSettings;
