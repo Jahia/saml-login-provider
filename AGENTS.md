@@ -75,7 +75,10 @@ yarn install
 ## Gotchas
 
 - The configuration is **server-wide**, stored in `karaf/etc/org.jahia.community.samlloginprovider.cfg`
-  — not scoped to any site. Do not reintroduce per-site storage, and do not re-gate it behind a
+  — not scoped to any site. The default `.cfg` file shipped by the module starts with the line
+  `# default configuration - won't be overridden`, which means it is copied to `karaf/etc` only
+  on first deployment; subsequent changes made via the admin UI or manual edits are preserved
+  across module redeployments. Do not reintroduce per-site storage, and do not re-gate it behind a
   per-site permission: a prior version of this module checked `siteAdminSamlLoginProvider` on
   `/sites/{siteKey}`, which let any single site's admin disable SAML enforcement platform-wide or
   add an unconfigured host (login lockout / DoS) on hosts they had no authority over. The
@@ -86,3 +89,8 @@ yarn install
   the choice page or the SAML endpoint itself could become a post-login redirect target (loop).
 - `SamlLoginProviderPermissions` checks the JCR root node (`/`), not a site node — do not
   reintroduce a `/sites/{siteKey}` path check here.
+- **Login lockout risk**: Every host added to the `fqdn` list must have the saml-authentication-valve
+  module properly configured and enabled on a site reachable at that host. If a host is added
+  without SAML valve setup, users are redirected to `/home.connect.saml` (a 400 error with no
+  fallback), locking them out entirely. The `HostList.isValid()` method validates hostname syntax
+  but not SAML valve deployment — operators must verify prerequisites before adding hosts.
