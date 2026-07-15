@@ -1,5 +1,7 @@
-mutation UpdateSamlLoginProviderConfig($siteKey: String!, $fqdn: String) {
-    updateSamlLoginProviderConfig(siteKey: $siteKey, fqdn: $fqdn) {
-        fqdn
+mutation UpdateSamlLoginProviderConfig($fqdn: String) {
+    samlLoginProvider {
+        update(fqdn: $fqdn) {
+            fqdn
+        }
     }
 }
