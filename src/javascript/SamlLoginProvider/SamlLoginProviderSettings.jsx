@@ -23,12 +23,13 @@ const isValidHostList = value => value
         HOST_PATTERN.test(host) &&
         host.split('.').every(label => label.length <= MAX_LABEL_LENGTH));
 
-export function SamlLoginProviderSettings({siteKey}) {
+export const SamlLoginProviderSettings = ({siteKey}) => {
     const {t} = useTranslation('saml-login-provider');
 
     const [fqdn, setFqdn] = useState('');
     const [fqdnError, setFqdnError] = useState('');
-    const [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'success' | 'error' | 'cancel'
+    // Status is one of: null, 'saving', 'success', 'error', 'cancel'
+    const [saveStatus, setSaveStatus] = useState(null);
 
     // Update page title for the SPA route — siteKey disambiguates multiple open tabs
     useEffect(() => {
@@ -72,8 +73,7 @@ export function SamlLoginProviderSettings({siteKey}) {
             } else {
                 setSaveStatus('error');
             }
-        } catch (err) {
-            console.error('Failed to update saml-login-provider configuration:', err);
+        } catch {
             setSaveStatus('error');
         }
     };
@@ -135,14 +135,14 @@ export function SamlLoginProviderSettings({siteKey}) {
                         <Input
                             id="slp-fqdn"
                             value={fqdn}
-                            onChange={e => {
-                                setFqdn(e.target.value);
-                                setFqdnError('');
-                            }}
                             placeholder="edit.jahia.com,editpp.jahia.com"
                             aria-invalid={fqdnError ? 'true' : undefined}
                             aria-describedby={fqdnError ? 'slp-fqdn-error' : 'slp-fqdn-hint'}
                             autoComplete="off"
+                            onChange={e => {
+                                setFqdn(e.target.value);
+                                setFqdnError('');
+                            }}
                         />
                         <span id="slp-fqdn-hint" className={styles.slp_hint}>
                             {t('label.fqdn_hint')}
@@ -174,7 +174,7 @@ export function SamlLoginProviderSettings({siteKey}) {
             </div>
         </div>
     );
-}
+};
 
 SamlLoginProviderSettings.propTypes = {
     siteKey: PropTypes.string.isRequired

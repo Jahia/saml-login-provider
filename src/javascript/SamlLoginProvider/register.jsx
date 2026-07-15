@@ -1,8 +1,9 @@
 import {registry} from '@jahia/ui-extender';
 import React from 'react';
+import PropTypes from 'prop-types';
 import SamlLoginProviderSettings from './SamlLoginProviderSettings';
 
-function SamlLoginProviderSettingsRoute(props) {
+const SamlLoginProviderSettingsRoute = props => {
     // The siteKey is provided by Jahia admin via match params or context
     const siteKey =
         (props.match && props.match.params && props.match.params.siteKey) ||
@@ -13,7 +14,19 @@ function SamlLoginProviderSettingsRoute(props) {
     }
 
     return <SamlLoginProviderSettings siteKey={siteKey}/>;
-}
+};
+
+SamlLoginProviderSettingsRoute.propTypes = {
+    match: PropTypes.shape({
+        params: PropTypes.shape({
+            siteKey: PropTypes.string
+        })
+    })
+};
+
+SamlLoginProviderSettingsRoute.defaultProps = {
+    match: undefined
+};
 
 export default () => {
     registry.add('adminRoute', 'samlLoginProvider', {
