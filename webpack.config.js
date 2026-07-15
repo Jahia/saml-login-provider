@@ -93,7 +93,12 @@ module.exports = (env, argv) => {
                 }
             })),
             new CleanWebpackPlugin({verbose: false}),
-            new CopyWebpackPlugin({patterns: [{from: './package.json', to: ''}]}),
+            new CopyWebpackPlugin({
+                patterns: [
+                    {from: './package.json', to: ''},
+                    {from: 'src/javascript/locales', to: '../locales'}
+                ]
+            }),
             new CycloneDxWebpackPlugin(cycloneDxWebpackPluginOptions)
         ],
         mode: 'development'
