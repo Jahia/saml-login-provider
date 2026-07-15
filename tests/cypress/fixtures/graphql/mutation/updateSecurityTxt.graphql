@@ -1,0 +1,35 @@
+mutation UpdateSecurityTxt(
+    $siteKey: String!
+    $contact: String
+    $expires: String
+    $acknowledgments: String
+    $canonical: String
+    $encryption: String
+    $hiring: String
+    $policy: String
+    $preferredLanguages: String
+) {
+    securityTxt {
+        update(
+            siteKey: $siteKey
+            contact: $contact
+            expires: $expires
+            acknowledgments: $acknowledgments
+            canonical: $canonical
+            encryption: $encryption
+            hiring: $hiring
+            policy: $policy
+            preferredLanguages: $preferredLanguages
+        ) {
+            siteKey
+            contact
+            expires
+            acknowledgments
+            canonical
+            encryption
+            hiring
+            policy
+            preferredLanguages
+        }
+    }
+}

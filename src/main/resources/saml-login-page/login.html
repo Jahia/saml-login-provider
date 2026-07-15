@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- Mirror of Jahia's standard login page (errors/error_401.jsp) with an
+     additional "Sign in with Google" button launching the SAML flow.
+     All __PLACEHOLDERS__ are substituted (pre-escaped) by SamlLoginPageFilter. -->
+<html lang="__LANG__">
+<head>
+    <title>__LABEL_TITLE__</title>
+    <meta charset="UTF-8">
+    <meta name="robots" content="noindex, nofollow"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="shortcut icon" href="__CTX__/favicon.ico">
+
+    <!-- Import font (Nunito Sans) -->
+    <link href="__CTX__/css/loginFont.css" rel="stylesheet">
+
+    <!-- Main style (same as the standard login page) -->
+    <link rel="stylesheet" href="__CTX__/css/loginMain_dark.css">
+
+    <style>
+        /* Visually hidden but available to assistive technology */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .login-divider {
+            display: flex;
+            align-items: center;
+            margin: 24px 0 16px;
+            /* opaque enough for AAA contrast over the background image, reinforced by a shadow */
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .login-divider::before,
+        .login-divider::after {
+            content: "";
+            flex: 1;
+            border-top: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .login-divider::before { margin-right: 12px; }
+        .login-divider::after { margin-left: 12px; }
+
+        /* Always-visible keyboard focus indicator (in case the theme CSS suppresses it) */
+        button:focus-visible,
+        input:focus-visible {
+            outline: 3px solid #fff;
+            outline-offset: 2px;
+        }
+
+        /* AAA target size for the "remember me" control */
+        input[type="checkbox"] {
+            min-width: 24px;
+            min-height: 24px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<section class="login" style="background-image: url(__CTX__/css/images/login-background.jpg);">
+    <main class="login-main">
+        <div class="position-container">
+            <div class="logo-form-container">
+                <div class="logo">
+                    <img src="__CTX__/css/images/dx_logo.png" alt="Jahia">
+                </div>
+                <div class="login-form">
+                    <h1 class="sr-only">__LABEL_TITLE__</h1>
+                    __ERROR_BLOCK__
+                    <form id="loginForm" name="loginForm" method="post" action="__CTX__/cms/login" aria-label="__LABEL_TITLE__">
+                        __SITE_FIELD__
+                        __REDIRECT_FIELD__
+                        __FAILURE_REDIRECT_FIELD__
+                        <div class="group">
+                            <label class="inputlabel" for="username">__LABEL_USERNAME__</label>
+                            <input type="text" name="username" id="username" maxlength="250" required autocomplete="username"/>
+                            <span class="highlight"></span>
+                            <span class="bar"></span>
+                        </div>
+                        <div class="group">
+                            <label class="inputlabel" for="password">__LABEL_PASSWORD__</label>
+                            <input type="password" name="password" id="password" maxlength="250" required autocomplete="current-password"/>
+                            <span class="highlight"></span>
+                            <span class="bar"></span>
+                        </div>
+                        <div class="check-button-container">
+                            <input type="checkbox" name="useCookie" id="useCookie" class="fs1"/>
+                            <label class="check-label no-select" for="useCookie">__LABEL_REMEMBERME__</label>
+                        </div>
+                        <button type="submit">__LABEL_LOGIN__</button>
+                    </form>
+
+                    <div class="login-divider" aria-hidden="true">__LABEL_OR__</div>
+
+                    <form id="googleLoginForm" name="googleLoginForm" method="get" action="__CTX__/home.connect.saml" aria-label="__LABEL_GOOGLE__">
+                        __GOOGLE_REDIRECT_FIELD__
+                        <button type="submit">__LABEL_GOOGLE__</button>
+                    </form>
+                </div>
+            </div>
+            <div class="login-footer">Jahia - Copyrights &copy; Jahia Solutions Group SA.</div>
+        </div>
+    </main>
+</section>
+</body>
+</html>

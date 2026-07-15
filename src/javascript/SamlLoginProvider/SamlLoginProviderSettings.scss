@@ -1,0 +1,110 @@
+.slp_sr_only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.slp_page_header {
+  font-family: 'Nunito Sans', sans-serif;
+  padding: var(--spacing-large, 24px) var(--spacing-large, 24px) 0;
+
+  h2 {
+    margin: 0;
+    color: var(--color-dark, #131c21);
+  }
+}
+
+.slp_container {
+  font-family: 'Nunito Sans', sans-serif;
+  color: var(--color-dark, #131c21);
+  max-width: 720px;
+  padding: var(--spacing-large, 24px);
+}
+
+// Module-level focus-visible safety net — activates only if a child has no outline of its own
+.slp_container *:focus-visible {
+  outline: 2px solid var(--color-accent, #00a0e3);
+  outline-offset: 2px;
+}
+
+.slp_loading,
+.slp_error {
+  font-family: 'Nunito Sans', sans-serif;
+  padding: var(--spacing-medium, 16px);
+  color: #5c6370;
+}
+
+.slp_error {
+  color: var(--color-danger, #f44053);
+}
+
+.slp_intro {
+  margin-bottom: var(--spacing-large, 24px);
+  padding: var(--spacing-medium, 16px);
+  background: var(--color-light, #fdfdfd);
+  border-left: 3px solid var(--color-accent, #00a0e3);
+  border-radius: 0 var(--radius, 4px) var(--radius, 4px) 0;
+
+  p {
+    margin: 0 0 var(--spacing-small, 8px);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: #5c6370;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.slp_alert {
+  padding: var(--spacing-small, 8px) var(--spacing-medium, 16px);
+  border-radius: var(--radius, 4px);
+  font-size: 0.8125rem;
+  margin-bottom: var(--spacing-medium, 16px);
+  border: 1px solid transparent;
+
+  &--success {
+    background: #e6f6ec;
+    border-color: #19855f;
+    color: #11593f;
+  }
+
+  &--error {
+    background: #fde9eb;
+    border-color: #b00020;
+    color: #b00020;
+  }
+}
+
+.slp_form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-medium, 16px);
+}
+
+.slp_hint {
+  display: block;
+  margin-top: var(--spacing-xsmall, 4px);
+  font-size: 0.75rem;
+  color: #5c6370;
+}
+
+.slp_error_msg {
+  display: block;
+  margin-top: var(--spacing-xsmall, 4px);
+  font-size: 0.75rem;
+  color: var(--color-danger, #b00020);
+}
+
+.slp_actions {
+  display: flex;
+  gap: var(--spacing-small, 8px);
+  margin-top: var(--spacing-medium, 16px);
+}

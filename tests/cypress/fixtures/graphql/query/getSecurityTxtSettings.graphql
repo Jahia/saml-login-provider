@@ -1,0 +1,15 @@
+query GetSecurityTxtSettings($siteKey: String!) {
+    securityTxt {
+        settings(siteKey: $siteKey) {
+            siteKey
+            contact
+            expires
+            acknowledgments
+            canonical
+            encryption
+            hiring
+            policy
+            preferredLanguages
+        }
+    }
+}
