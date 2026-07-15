@@ -119,6 +119,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         tokens.put("__LANG__", escapeHtml(locale.toLanguageTag()));
         tokens.put("__CTX__", escapeHtml(contextPath));
         tokens.put("__ERROR_BLOCK__", errorBlock(loginError, locale));
+        tokens.put("__FIELD_ERROR_ATTRS__", fieldErrorAttrs(loginError));
         tokens.put("__SITE_FIELD__", siteField(request.getParameter("site")));
         tokens.put("__REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM, redirect));
         tokens.put("__GOOGLE_REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM, redirect));
@@ -194,9 +195,23 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         } else {
             messageKey = "message.invalidUsernamePassword";
         }
-        // role="alert" so screen readers announce the error on this server-rendered reload
-        return "<div class=\"login-error\" role=\"alert\">"
+        // id="login-error" is referenced by aria-describedby on the username/password inputs
+        // (see fieldErrorAttrs); role="alert" so screen readers announce the error on this
+        // server-rendered reload
+        return "<div id=\"login-error\" class=\"login-error\" role=\"alert\">"
                 + label(locale, messageKey, "Invalid username/password") + "</div>";
+    }
+
+    /**
+     * When a login attempt failed, both credential fields are flagged invalid and pointed at the
+     * {@code #login-error} message (same pattern as the settings screen's {@code slp-fqdn} field)
+     * so assistive technology announces the association, not just the visual error block.
+     */
+    private static String fieldErrorAttrs(String loginError) {
+        if (loginError == null) {
+            return "";
+        }
+        return " aria-invalid=\"true\" aria-describedby=\"login-error\"";
     }
 
     private static String siteField(String site) {

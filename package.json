@@ -12,6 +12,8 @@
     "clean:all": "yarn clean && rimraf node_modules node",
     "lint:js": "eslint --ext js,jsx src",
     "lint:js:fix": "yarn lint:js --fix src",
+    "lint:scss": "stylelint \"src/**/*.scss\"",
+    "lint:scss:fix": "yarn lint:scss --fix",
     "sync-pom": "sync-pom-version --use-yarn"
   },
   "description": "Automatic SAML login URL provider for Jahia",
@@ -40,6 +42,8 @@
     "fast-uri": "^3.1.2",
     "ip-address": "^10.1.1",
     "js-yaml": "^4.1.1",
+    "strip-ansi": "6.0.0",
+    "string-width": "4.2.2",
     "node-fetch": "^2.6.7",
     "normalize-package-data": "^7.0.0",
     "serialize-javascript": "^7.0.5"
@@ -64,6 +68,8 @@
     "sass": "^1.52.1",
     "sass-loader": "^12.4.0",
     "style-loader": "^3.3.1",
+    "stylelint": "^15.11.0",
+    "stylelint-config-standard-scss": "^11.1.0",
     "sync-pom-version-to-package": "^1.6.1",
     "webpack": "^5.91.0",
     "webpack-bundle-analyzer": "^4.10.2",

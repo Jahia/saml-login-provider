@@ -28,8 +28,9 @@
 }
 
 // Module-level focus-visible safety net — activates only if a child has no outline of its own
+// #0079ad on white ≈ 4.8:1, clearing the 3:1 minimum for a focus indicator (was #00a0e3 ≈ 2.9:1)
 .slp_container *:focus-visible {
-  outline: 2px solid var(--color-accent, #00a0e3);
+  outline: 2px solid var(--color-accent, #0079ad);
   outline-offset: 2px;
 }
 
@@ -37,11 +38,15 @@
 .slp_error {
   font-family: 'Nunito Sans', sans-serif;
   padding: var(--spacing-medium, 16px);
-  color: #5c6370;
+
+  // #43494f on white ≈ 9.1:1 / on #fdfdfd ≈ 9.0:1 — clears the AAA 7:1 threshold (was #5c6370 ≈ 6:1)
+  color: #43494f;
 }
 
 .slp_error {
-  color: var(--color-danger, #f44053);
+  // standardized on the same --color-danger fallback used everywhere else in this file
+  // (#b00020 on white ≈ 7.3:1, AAA; the previous #f44053 fallback was ≈ 3.7:1, failing even AA)
+  color: var(--color-danger, #b00020);
 }
 
 .slp_intro {
@@ -55,12 +60,30 @@
     margin: 0 0 var(--spacing-small, 8px);
     font-size: 0.8125rem;
     line-height: 1.5;
-    color: #5c6370;
+
+    // #43494f on #fdfdfd ≈ 9.0:1 — clears the AAA 7:1 threshold (was #5c6370 ≈ 6:1)
+    color: #43494f;
 
     &:last-child {
       margin-bottom: 0;
     }
   }
+}
+
+// Genuinely distinct warning treatment for the server-wide scope notice — this is now a
+// true server-level control, so a mistake here is more consequential than the neutral
+// description above it; bold text alone did not convey that.
+// #5c3a00 on #fff4e0 ≈ 9.4:1 (AAA); border #b25f00 ≈ 4.3:1 against that background (>3:1, non-text)
+.slp_scope_warning {
+  margin-bottom: var(--spacing-large, 24px);
+  padding: var(--spacing-medium, 16px);
+  background: #fff4e0;
+  border: 1px solid #b25f00;
+  border-left-width: 4px;
+  border-radius: var(--radius, 4px);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #5c3a00;
 }
 
 .slp_alert {
@@ -79,7 +102,16 @@
   &--error {
     background: #fde9eb;
     border-color: #b00020;
-    color: #b00020;
+
+    // #7a0016 on #fde9eb ≈ 9.8:1 — clears the AAA 7:1 threshold (was #b00020 on this bg ≈ 6.3:1)
+    color: #7a0016;
+  }
+
+  // Neutral acknowledgment style (e.g. "changes discarded") — #0b4f6c on #eef6fb ≈ 8.2:1 (AAA)
+  &--info {
+    background: #eef6fb;
+    border-color: #0b4f6c;
+    color: #0b4f6c;
   }
 }
 
@@ -93,7 +125,9 @@
   display: block;
   margin-top: var(--spacing-xsmall, 4px);
   font-size: 0.75rem;
-  color: #5c6370;
+
+  // #43494f on white ≈ 9.1:1 — clears the AAA 7:1 threshold (was #5c6370 ≈ 6:1)
+  color: #43494f;
 }
 
 .slp_error_msg {

@@ -6,7 +6,8 @@
     "update": "Save",
     "cancel": "Cancel",
     "saving": "Saving…",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "retry": "Retry"
   },
   "samlLoginProvider": {
     "description": "On the hosts listed below, unauthenticated visitors are redirected to the SAML connect endpoint (/home.connect.saml) instead of the Jahia login page, and the logout button lands on a public page.",
@@ -24,6 +25,9 @@
       },
       "load": {
         "failed": "Failed to load the SAML auto-login configuration"
+      },
+      "refetch": {
+        "failed": "Your changes were saved, but the display could not be refreshed automatically. Reload the page to confirm the current configuration."
       },
       "fqdn": {
         "invalid": "Enter a comma-separated list of valid hostnames (e.g. editpp.jahia.com), or leave the field empty."

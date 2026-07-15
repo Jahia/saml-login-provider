@@ -263,7 +263,28 @@ class SamlLoginPageFilterTest {
 
         // Assert
         assertThat(body.toString()).doesNotContain("<injected>");
-        assertThat(body.toString()).contains("class=\"login-error\" role=\"alert\"");
+        assertThat(body.toString()).contains("id=\"login-error\" class=\"login-error\" role=\"alert\"");
+    }
+
+    @Test
+    void doFilter_loginErrorPresent_flagsCredentialFieldsAsInvalidAndDescribedByError() throws Exception {
+        // Arrange
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getParameter("loginError")).thenReturn("some_unknown_code");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+
+        // Act
+        filter.doFilter(request, response, chain);
+
+        // Assert
+        String rendered = body.toString();
+        assertThat(rendered).contains(
+                "id=\"username\" maxlength=\"250\" required autocomplete=\"username\""
+                        + " aria-invalid=\"true\" aria-describedby=\"login-error\"");
+        assertThat(rendered).contains(
+                "id=\"password\" maxlength=\"250\" required autocomplete=\"current-password\""
+                        + " aria-invalid=\"true\" aria-describedby=\"login-error\"");
     }
 
     @Test
@@ -324,6 +345,8 @@ class SamlLoginPageFilterTest {
 
         // Assert
         assertThat(body.toString()).doesNotContain("login-error");
+        assertThat(body.toString()).doesNotContain("aria-invalid");
+        assertThat(body.toString()).doesNotContain("aria-describedby=\"login-error\"");
     }
 
     private void givenBasicGetRequest(String contextPath, Locale locale) {

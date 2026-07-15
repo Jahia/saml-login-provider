@@ -34,9 +34,6 @@
             display: flex;
             align-items: center;
             margin: 24px 0 16px;
-            /* opaque enough for AAA contrast over the background image, reinforced by a shadow */
-            color: #fff;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
             font-size: 12px;
             text-transform: uppercase;
         }
@@ -51,17 +48,46 @@
         .login-divider::before { margin-right: 12px; }
         .login-divider::after { margin-left: 12px; }
 
-        /* Always-visible keyboard focus indicator (in case the theme CSS suppresses it) */
+        /* Solid-enough scrim (not a text-shadow trick) behind the label: measured against a
+           worst-case pure-white pixel of the photo background this still yields ~9.2:1 for
+           white text, comfortably clearing the AAA 7:1 threshold regardless of what is behind it. */
+        .login-divider-label {
+            color: #fff;
+            background: rgba(0, 0, 0, 0.72);
+            padding: 2px 10px;
+            border-radius: 4px;
+        }
+
+        /* Always-visible keyboard focus indicator, robust regardless of the underlying button's
+           own background color (which comes from the external loginMain_dark.css and may be
+           light, e.g. a Google-style button): a dark ring hugs the control (visible on light
+           backgrounds), followed by a light outer ring (visible on dark backgrounds/the photo). */
         button:focus-visible,
         input:focus-visible {
             outline: 3px solid #fff;
             outline-offset: 2px;
+            box-shadow: 0 0 0 5px #000;
         }
 
-        /* AAA target size for the "remember me" control */
+        /* AAA target size (2.5.8) for the checkbox itself; the "remember me" label below is
+           additionally padded to provide a >=44x44 equivalent target (2.5.5) for the same toggle. */
         input[type="checkbox"] {
             min-width: 24px;
             min-height: 24px;
+        }
+
+        .check-button-container {
+            display: flex;
+            align-items: center;
+            min-height: 44px;
+        }
+
+        .check-button-container .check-label {
+            display: inline-flex;
+            align-items: center;
+            min-height: 44px;
+            padding: 10px 12px 10px 8px;
+            cursor: pointer;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -90,13 +116,13 @@
                         __FAILURE_REDIRECT_FIELD__
                         <div class="group">
                             <label class="inputlabel" for="username">__LABEL_USERNAME__</label>
-                            <input type="text" name="username" id="username" maxlength="250" required autocomplete="username"/>
+                            <input type="text" name="username" id="username" maxlength="250" required autocomplete="username"__FIELD_ERROR_ATTRS__/>
                             <span class="highlight"></span>
                             <span class="bar"></span>
                         </div>
                         <div class="group">
                             <label class="inputlabel" for="password">__LABEL_PASSWORD__</label>
-                            <input type="password" name="password" id="password" maxlength="250" required autocomplete="current-password"/>
+                            <input type="password" name="password" id="password" maxlength="250" required autocomplete="current-password"__FIELD_ERROR_ATTRS__/>
                             <span class="highlight"></span>
                             <span class="bar"></span>
                         </div>
@@ -107,7 +133,7 @@
                         <button type="submit">__LABEL_LOGIN__</button>
                     </form>
 
-                    <div class="login-divider" aria-hidden="true">__LABEL_OR__</div>
+                    <div class="login-divider" aria-hidden="true"><span class="login-divider-label">__LABEL_OR__</span></div>
 
                     <form id="googleLoginForm" name="googleLoginForm" method="get" action="__CTX__/home.connect.saml" aria-label="__LABEL_GOOGLE__">
                         __GOOGLE_REDIRECT_FIELD__

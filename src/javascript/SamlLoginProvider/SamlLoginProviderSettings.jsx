@@ -29,6 +29,11 @@ export const SamlLoginProviderSettings = () => {
     const [fqdnError, setFqdnError] = useState('');
     // Status is one of: null, 'saving', 'success', 'error', 'cancel'
     const [saveStatus, setSaveStatus] = useState(null);
+    // Becomes true once the config has loaded successfully at least once — used to tell an
+    // initial-load failure (full-page error state) apart from a later background refetch
+    // failure (which must not tear down an already-mounted, working form)
+    const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+    const [refetchFailed, setRefetchFailed] = useState(false);
 
     // Update page title for the SPA route — this setting is server-wide, so there is
     // no site to disambiguate between multiple open tabs.
@@ -40,7 +45,7 @@ export const SamlLoginProviderSettings = () => {
         };
     }, []);
 
-    const {data: configData, loading: configLoading, error: configError} = useQuery(
+    const {data: configData, loading: configLoading, error: configError, refetch: refetchConfig} = useQuery(
         GET_SAML_LOGIN_PROVIDER_CONFIG,
         {fetchPolicy: 'network-only'}
     );
@@ -52,8 +57,19 @@ export const SamlLoginProviderSettings = () => {
     useEffect(() => {
         if (configData && configData.samlLoginProvider) {
             setFqdn(configData.samlLoginProvider.config.fqdn || '');
+            setHasLoadedOnce(true);
+            setRefetchFailed(false);
         }
     }, [configData]);
+
+    // A background refetch (triggered by the mutation's refetchQueries) failing after the form
+    // is already mounted must not replace the whole form with the full-page error state — only
+    // an error on the very first load does that (see the early-return branches below).
+    useEffect(() => {
+        if (configError && hasLoadedOnce) {
+            setRefetchFailed(true);
+        }
+    }, [configError, hasLoadedOnce]);
 
     const handleSubmit = async () => {
         if (!isValidHostList(fqdn)) {
@@ -87,14 +103,20 @@ export const SamlLoginProviderSettings = () => {
         setSaveStatus('cancel');
     };
 
-    if (configLoading) {
+    if (configLoading && !hasLoadedOnce) {
         return <div className={styles.slp_loading} role="status">{t('label.loading')}</div>;
     }
 
-    if (configError) {
+    if (configError && !hasLoadedOnce) {
         return (
             <div className={styles.slp_error} role="alert">
-                {t('samlLoginProvider.errors.load.failed')}: {configError.message}
+                <p>{t('samlLoginProvider.errors.load.failed')}: {configError.message}</p>
+                <Button
+                    type="button"
+                    label={t('label.retry')}
+                    variant="secondary"
+                    onClick={() => refetchConfig()}
+                />
             </div>
         );
     }
@@ -106,7 +128,9 @@ export const SamlLoginProviderSettings = () => {
                 {saveStatus === 'success' ? t('samlLoginProvider.success.update') : saveStatus === 'cancel' ? t('samlLoginProvider.cancel') : ''}
             </div>
             <div role="alert" aria-live="assertive" aria-atomic="true" className={styles.slp_sr_only}>
-                {saveStatus === 'error' ? t('samlLoginProvider.errors.update.failed') : ''}
+                {saveStatus === 'error' ?
+                    t('samlLoginProvider.errors.update.failed') :
+                    refetchFailed ? t('samlLoginProvider.errors.refetch.failed') : ''}
             </div>
 
             <div className={styles.slp_page_header}>
@@ -116,9 +140,17 @@ export const SamlLoginProviderSettings = () => {
                 <div className={styles.slp_intro}>
                     <p>{t('samlLoginProvider.description')}</p>
                     <p>{t('samlLoginProvider.disabled.hint')}</p>
-                    <p><strong>{t('samlLoginProvider.scope')}</strong></p>
                 </div>
 
+                <div className={styles.slp_scope_warning} role="note">
+                    <strong>{t('samlLoginProvider.scope')}</strong>
+                </div>
+
+                {refetchFailed && (
+                    <div aria-hidden="true" className={`${styles.slp_alert} ${styles['slp_alert--error']}`}>
+                        {t('samlLoginProvider.errors.refetch.failed')}
+                    </div>
+                )}
                 {saveStatus === 'success' && (
                     <div aria-hidden="true" className={`${styles.slp_alert} ${styles['slp_alert--success']}`}>
                         {t('samlLoginProvider.success.update')}
@@ -127,6 +159,11 @@ export const SamlLoginProviderSettings = () => {
                 {saveStatus === 'error' && (
                     <div aria-hidden="true" className={`${styles.slp_alert} ${styles['slp_alert--error']}`}>
                         {t('samlLoginProvider.errors.update.failed')}
+                    </div>
+                )}
+                {saveStatus === 'cancel' && (
+                    <div aria-hidden="true" className={`${styles.slp_alert} ${styles['slp_alert--info']}`}>
+                        {t('samlLoginProvider.cancel')}
                     </div>
                 )}
 
