@@ -1,0 +1,5 @@
+query GetSamlLoginProviderConfig($siteKey: String!) {
+    samlLoginProviderConfig(siteKey: $siteKey) {
+        fqdn
+    }
+}

@@ -1,7 +1,7 @@
 {
-  "name": "module-manager-cypress",
+  "name": "saml-login-provider-cypress",
   "version": "1.0.0",
-  "description": "Cypress tests for the Jahia Module Manager module",
+  "description": "Cypress tests for the Jahia SAML Login Provider module",
   "devDependencies": {
     "@apollo/client": "^3.14.0",
     "@babel/core": "^7.25.2",
@@ -60,15 +60,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Jahia/module-manager.git",
+    "url": "git+https://github.com/Jahia/saml-login-provider.git",
     "directory": "tests"
   },
   "author": "",
   "license": "SEE LICENSE IN LICENSE.txt",
   "bugs": {
-    "url": "https://github.com/Jahia/module-manager/issues"
+    "url": "https://github.com/Jahia/saml-login-provider/issues"
   },
-  "homepage": "https://github.com/Jahia/module-manager#readme",
+  "homepage": "https://github.com/Jahia/saml-login-provider#readme",
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e",
   "resolutions": {
     "@babel/plugin-transform-modules-systemjs": "^7.29.4",
