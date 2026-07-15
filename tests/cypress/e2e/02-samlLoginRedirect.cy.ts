@@ -61,4 +61,27 @@ describe('SAML Login redirect behavior', () => {
         cy.get('#googleLoginForm').should('exist').and('have.attr', 'action').and('include', samlConnectPath)
         cy.contains('button', 'Sign in with Google').should('be.visible')
     })
+
+    it('flags the credential fields as invalid and links them to the error message after a failed login attempt', () => {
+        cy.clearCookies()
+        cy.visit(choiceLoginPath)
+
+        // No aria-invalid/aria-describedby before any attempt has failed
+        cy.get('#username').should('not.have.attr', 'aria-invalid')
+        cy.get('#password').should('not.have.attr', 'aria-invalid')
+
+        cy.get('#username').type('not-a-real-user')
+        cy.get('#password').type('wrong-password')
+        cy.get('#loginForm').submit()
+
+        cy.location('pathname').should('eq', choiceLoginPath)
+        cy.get('#login-error').should('be.visible').and('have.attr', 'role', 'alert')
+
+        cy.get('#username')
+            .should('have.attr', 'aria-invalid', 'true')
+            .and('have.attr', 'aria-describedby', 'login-error')
+        cy.get('#password')
+            .should('have.attr', 'aria-invalid', 'true')
+            .and('have.attr', 'aria-describedby', 'login-error')
+    })
 })

@@ -108,6 +108,10 @@ describe('SAML Login Provider Settings', () => {
         // Value should revert to the last loaded one
         cy.get('#slp-fqdn input').should('have.value', 'original.jahia.com')
 
+        // A visible cancel acknowledgment must appear (a11y fix: previously only
+        // announced via the aria-live region, not shown to sighted users)
+        cy.contains('Changes discarded.').should('be.visible')
+
         // And nothing was persisted from the cancelled edit
         cy.apollo({ query: getSamlLoginProviderConfig })
             .its('data.samlLoginProvider.config.fqdn')
