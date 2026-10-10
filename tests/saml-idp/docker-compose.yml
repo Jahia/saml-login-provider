@@ -1,0 +1,49 @@
+# Keycloak SAML IdP fixture for manual end-to-end testing of saml-login-provider.
+#
+# WHY THIS EXISTS. saml-login-provider only decides *where* to send an unauthenticated visitor:
+# on a configured host it redirects to /home.connect.saml. Nothing in the jahia-ee-dev image
+# serves that URL -- the image ships 189 bundles and none of them is jahia-authentication or
+# saml-authentication-valve. Without an IdP the redirect target is a 400, so the module can only
+# ever be tested up to "the Location header looks right". This stack closes that gap.
+#
+# IT JOINS THE EXISTING tests_stack NETWORK created by ../docker-compose.yml, declared external
+# on purpose: this file must never create a second Jahia, never own the Jahia container's
+# lifecycle, and never be part of the CI path. Start the module's own stack first.
+#
+#   cd tests && ./ci.startup.sh           # brings up jahia + tests_stack
+#   cd tests/saml-idp && ./setup.sh       # this IdP + the auth modules + the connector config
+#
+# Keycloak is published on 127.0.0.1:8180 and advertises itself as http://localhost:8180 so that
+# the BROWSER can follow the SAML redirect. Jahia never calls Keycloak back-channel: the IdP
+# metadata (with its signing certificate) is embedded in the connector config as base64, and the
+# HTTP-Redirect binding is entirely browser-mediated.
+#
+# Credentials are a disposable fixture for a container bound to loopback only. Copy .env.example
+# to .env; .env is gitignored and nothing in the repo depends on its value.
+services:
+    keycloak:
+        image: quay.io/keycloak/keycloak:25.0
+        container_name: slp-saml-idp-keycloak
+        command: ['start-dev', '--http-port=8180', '--import-realm']
+        environment:
+            # Interpolated from .env in this directory, or from the shell that runs setup.sh.
+            - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
+            - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+            # Make every URL Keycloak mints (including the SAML SSO endpoint inside its own
+            # metadata) point at the address the browser uses, not the container name.
+            - KC_HOSTNAME=localhost
+            - KC_HOSTNAME_PORT=8180
+            - KC_HOSTNAME_STRICT=false
+            - KC_HOSTNAME_STRICT_HTTPS=false
+            - KC_HTTP_ENABLED=true
+        volumes:
+            - ./realm:/opt/keycloak/data/import:ro
+        ports:
+            - '127.0.0.1:8180:8180'
+        networks:
+            - stack
+
+networks:
+    stack:
+        name: tests_stack
+        external: true
