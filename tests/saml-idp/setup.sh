@@ -224,6 +224,23 @@ KS_B64=$(base64 -w0 < sp-keystore.jks)
 # incomingTargetUrl must end in callback.saml: SAML2Filter matches *.saml and dispatches on the
 # suffix (connect/callback/metadata). The sample .cfg shipped inside the module still carries the
 # pre-3.x /cms/login.SAML.incoming value, which this filter would never see.
+# The user mapper, wired here rather than left to the admin UI.
+#
+# SAML2Filter.handleCallback hands the profile to config.getMappers(); with none configured the
+# assertion is accepted and the callback redirects normally but NO Jahia session is created -- a
+# silent no-op. ConnectorConfig.initMappers reads the mapping as a JSON array from
+# Saml.mappers.<mapperServiceName>.mapping, each entry {"mapper":{"name":..},"connector":{"name":..}}
+# where mapper.name is a jcr-auth-provider field and connector.name a SAML attribute.
+# ssoLoginId is the only mandatory one.
+#
+# ESCAPING: a Felix .cfg value starting with [ or ( is parsed as an array/vector, and " starts a
+# quoted token -- quoting the whole JSON does NOT work (Felix keeps the quotes and the JSON parser
+# fails with "A JSONArray text must start with '['"). Backslash is the escape character, so the
+# leading bracket and every inner quote are backslash-escaped. Single-quoted here so the shell
+# leaves the backslashes alone before the (unquoted) heredoc below interpolates the variable.
+# shellcheck disable=SC2016
+SAML_MAPPING='\[{\"mapper\":{\"name\":\"ssoLoginId\"},\"connector\":{\"name\":\"username\"}},{\"mapper\":{\"name\":\"j:email\"},\"connector\":{\"name\":\"email\"}},{\"mapper\":{\"name\":\"j:firstName\"},\"connector\":{\"name\":\"firstName\"}},{\"mapper\":{\"name\":\"j:lastName\"},\"connector\":{\"name\":\"lastName\"}}]'
+
 CFG=org.jahia.modules.auth-$SITE_KEY.cfg
 cat > "$CFG" <<EOF
 siteKey = $SITE_KEY
@@ -248,6 +265,8 @@ Saml.requireSignedAssertions = true
 # so flipping this to true is a valid stricter test; false is the module's own default.
 Saml.requireSignedResponses = false
 Saml.bindingType = urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST
+Saml.mappers.jcrOAuthProvider.enabled = true
+Saml.mappers.jcrOAuthProvider.mapping = $SAML_MAPPING
 EOF
 
 docker cp "$CFG" jahia:/var/jahia/karaf/etc/

@@ -42,17 +42,22 @@ already exported — whichever is present.
 `http://localhost:8080` still works for everything else, but it resolves to `systemsite`, which has
 no SAML connector — see *Things that are easy to get wrong* below.
 
-### The one manual step: the user mapper
+### The user mapper (wired automatically)
 
 `SAML2Filter.handleCallback()` hands the SAML profile to whichever mappers the connector has
 configured (`config.getMappers()`). With none configured the assertion is accepted, the callback
 redirects normally, and **no Jahia session is created** — a silent no-op rather than an error.
 
-Wire it once in the UI:
+`setup.sh` writes the mapping into the connector config, so no UI step is needed. After a login
+you should find a real Jahia user:
 
-> Administration → **digitall** → Authentication → SAML → **JCR Auth provider** →
-> map the connector's `username` field to **Login username** (`ssoLoginId`, the only mandatory
-> one) → Save
+```
+lookupUser(saml.tester) -> /users/ie/ie/ha/saml.tester
+   j:email = saml.tester@example.com
+```
+
+The equivalent by hand is Administration → **digitall** → Authentication → SAML → **JCR Auth
+provider** → map `username` to **Login username** (`ssoLoginId`, the only mandatory field) → Save.
 
 ### Then exercise saml-login-provider itself
 
@@ -146,6 +151,14 @@ therefore builds `sp-keystore.jks` with `keytool` and ships it as base64.
 on the suffix (`connect` / `callback` / `metadata`). The sample config shipped inside the module
 (`META-INF/configurations/org.jahia.modules.auth-sample.cfg`) still carries the pre-3.x
 `/cms/login.SAML.incoming`, which this filter would never see.
+
+**A Felix `.cfg` value cannot start with `[`, and quoting it does not help.** Felix parses a value
+beginning with `[` or `(` as an array/vector, and `"` as a quoted token — so wrapping the mapper's
+JSON array in quotes leaves the quotes *in* the value and
+`ConnectorConfig.initMappers` fails with `A JSONArray text must start with '['`. Backslash is the
+escape character: the leading bracket and every inner quote must be `\`-escaped. In `setup.sh` the
+mapping is held in a single-quoted variable so the shell does not eat the backslashes before the
+heredoc interpolates it.
 
 **Binary properties are base64.** `ConnectorConfig.getBinaryProperty()` is
 `Base64.getDecoder().decode(getProperty(...))`, so `identityProviderMetadata` and `keyStore` go into
