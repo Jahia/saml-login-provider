@@ -128,6 +128,18 @@ on the suffix (`connect` / `callback` / `metadata`). The sample config shipped i
 `Base64.getDecoder().decode(getProperty(...))`, so `identityProviderMetadata` and `keyStore` go into
 a flat `.cfg` as base64 strings.
 
+**Deploying a module jar does not enable it on a site.** Dropping a jar in `/var/jahia/modules`
+installs and starts the bundle, but leaves `j:installedModules` on `/sites/<site>` untouched. This
+is easy to miss here because `SAML2Filter` is a *global servlet filter*: the whole login flow works
+with the module enabled on no site at all, so the only symptom is that
+`saml-authentication-valve` appears "not enabled on the websites" — and the per-site settings
+screen where you wire the connector's mapper is absent. `setup.sh` enables
+`jahia-authentication`, `jcr-auth-provider` and `saml-authentication-valve` on `SITE_KEY` through
+the provisioning API (`{"enable": "...", "site": "..."}`).
+
+`saml-login-provider` is deliberately *not* enabled on any site: it is a server-level module whose
+admin route lives under Server settings and whose permission is checked on the JCR root node.
+
 **The realm JSON admits no stray keys.** Keycloak's importer deserializes strictly: one unknown
 field anywhere — an attempted `"_comment"` key, say, since JSON has no comments — fails the import
 *and* aborts startup (`Failed to import realms` … `Unrecognized field`, exit 1). Explanations go in

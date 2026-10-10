@@ -108,6 +108,32 @@ for _ in $(seq 1 60); do
     sleep 3
 done
 
+# ---------------------------------------------------------------- 1a. enable on the site
+# Dropping a jar in /var/jahia/modules INSTALLS and STARTS the bundle, but does not enable the
+# module on any site -- j:installedModules on /sites/<site> is untouched. The SAML2Filter is a
+# global servlet filter and works either way, which is exactly what makes this easy to miss: the
+# login flow succeeds while the module appears "not enabled on the websites".
+#
+# What does need site enablement is the per-site settings UI. jahia-authentication contributes
+# the Authentication section, and saml-authentication-valve / jcr-auth-provider contribute the
+# jmix:authConnectorSettingView views (saml2nt:samlAuthView, joant:jcrOAuthView) where the
+# connector and its mapper are wired. Without this step that screen is simply absent.
+#
+# saml-login-provider itself is deliberately NOT enabled here: it is a server-level module whose
+# admin route lives under Server settings and whose permission is checked on the JCR root node.
+log "Enabling the authentication modules on site $SITE_KEY"
+cat > .enable.run.json <<EOF
+[
+  {"enable":"jahia-authentication","site":"$SITE_KEY"},
+  {"enable":"jcr-auth-provider","site":"$SITE_KEY"},
+  {"enable":"saml-authentication-valve","site":"$SITE_KEY"}
+]
+EOF
+curl -sf -u "$JAHIA_ADMIN_USER:$SUPER_USER_PASSWORD" \
+    -F script=@.enable.run.json "$JAHIA_LOCAL_URL/modules/api/provisioning" -o /dev/null
+rm -f .enable.run.json
+echo "   enabled on $SITE_KEY"
+
 # ---------------------------------------------------------------- 1b. site hostname
 # Without this the connector below is bound to a site no request can resolve to. See the long
 # comment on SITE_KEY above and the header of configure-site-host.groovy.
