@@ -46,10 +46,15 @@ fi
 # configure-site-host.groovy gives digitall its own distinct j:serverName (= SITE_HOST), which is
 # the field behind Administration -> Sites -> digitall -> Web project settings -> Server name.
 # systemsite is left alone, so localhost -> systemsite still holds. You then browse the SP at
-# SITE_HOST, which is why JAHIA_PUBLIC_URL defaults to 127.0.0.1 rather than localhost: it needs
-# no DNS entry and no hosts file.
+# SITE_HOST.
+#
+# SITE_HOST must be a REAL hostname, never 'localhost' or '127.0.0.1'. Jahia rewrites site URLs
+# to ABSOLUTE ones built from j:serverName, so a loopback literal is baked into every link on the
+# site (href="http://127.0.0.1:8080/home.html"), which is meaningless to any client that is not
+# this machine. 'digitall.localhost' is a real name that still needs no hosts-file entry, since
+# browsers and glibc/systemd-resolved both map *.localhost to loopback.
 : "${SITE_KEY:=digitall}"
-: "${SITE_HOST:=127.0.0.1}"
+: "${SITE_HOST:=digitall.localhost}"
 : "${POST_LOGIN_PATH:=/home.html}"
 : "${SUPER_USER_PASSWORD:=root1234}"
 : "${JAHIA_ADMIN_USER:=root}"

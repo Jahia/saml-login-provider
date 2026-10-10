@@ -14,9 +14,9 @@
             "protocol": "saml",
             "publicClient": true,
             "frontchannelLogout": true,
-            "redirectUris": ["http://127.0.0.1:8080/*", "http://localhost:8080/*"],
-            "baseUrl": "http://127.0.0.1:8080/",
-            "adminUrl": "http://127.0.0.1:8080/home.callback.saml",
+            "redirectUris": ["http://digitall.localhost:8080/*", "http://localhost:8080/*"],
+            "baseUrl": "http://digitall.localhost:8080/",
+            "adminUrl": "http://digitall.localhost:8080/home.callback.saml",
             "attributes": {
                 "saml.authnstatement": "true",
                 "saml.server.signature": "true",
@@ -26,9 +26,9 @@
                 "saml_name_id_format": "username",
                 "saml_force_name_id_format": "true",
                 "saml.force.post.binding": "true",
-                "saml_assertion_consumer_url_post": "http://127.0.0.1:8080/home.callback.saml",
-                "saml_assertion_consumer_url_redirect": "http://127.0.0.1:8080/home.callback.saml",
-                "saml_single_logout_service_url_redirect": "http://127.0.0.1:8080/home.html"
+                "saml_assertion_consumer_url_post": "http://digitall.localhost:8080/home.callback.saml",
+                "saml_assertion_consumer_url_redirect": "http://digitall.localhost:8080/home.callback.saml",
+                "saml_single_logout_service_url_redirect": "http://digitall.localhost:8080/home.html"
             },
             "protocolMappers": [
                 {

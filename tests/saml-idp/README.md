@@ -34,9 +34,9 @@ already exported — whichever is present.
 | Keycloak admin | <http://localhost:8180/admin> |
 | Realm | `jahia-saml` |
 | SAML end user | `saml.tester` |
-| **Browse the SP at** | **<http://127.0.0.1:8080>** — this is what resolves to `digitall` |
+| **Browse the SP at** | **<http://digitall.localhost:8080>** — this is what resolves to `digitall` |
 | Jahia SP entity ID | `jahia-digitall` |
-| ACS | `http://127.0.0.1:8080/home.callback.saml` |
+| ACS | `http://digitall.localhost:8080/home.callback.saml` |
 | Connector | site `digitall`, OSGi factory config `org.jahia.modules.auth-digitall.cfg` |
 
 `http://localhost:8080` still works for everything else, but it resolves to `systemsite`, which has
@@ -56,7 +56,7 @@ Wire it once in the UI:
 
 ### Then exercise saml-login-provider itself
 
-> `http://127.0.0.1:8080/jahia/administration/samlLoginProvider` → host list = `127.0.0.1`
+> `http://digitall.localhost:8080/jahia/administration/samlLoginProvider` → host list = `digitall.localhost`
 
 The module matches `request.getServerName()`, so the value must be the host you browse with.
 Log out, request a protected page, and you should be carried to Keycloak and back.
@@ -94,7 +94,7 @@ nothing resolves to `digitall`.** `SAML2Util.findSiteKeyForRequest()` uses
 ```
 site=systemsite  serverName=localhost
 site=digitall    serverName=localhost
-resolve(localhost) -> systemsite     resolve(127.0.0.1) -> null
+resolve(localhost) -> systemsite     resolve(digitall.localhost) -> null
 resolve(jahia)     -> null           defaultSite        -> digitall
 ```
 
@@ -105,19 +105,31 @@ connector bound to `digitall` is unreachable by construction, and you get
 `No SAML2 settings found for siteKey: systemsite`.
 
 `setup.sh` fixes this by giving digitall its **own** `j:serverName` (= `SITE_HOST`, default
-`127.0.0.1`) via `configure-site-host.groovy`, run through the provisioning API. That is the field
+`digitall.localhost`) via `configure-site-host.groovy`, run through the provisioning API. That is the field
 behind Administration → Sites → digitall → Web project settings → **Server name**, so the
 configuration is visible where you would look for it. `systemsite` is untouched and
-`localhost → systemsite` still holds. You then browse the SP at `http://127.0.0.1:8080`;
-`127.0.0.1` needs no DNS entry or hosts file. Browsing at `localhost:8080` lands on systemsite,
-which has no connector.
+`localhost → systemsite` still holds. You then browse the SP at `http://digitall.localhost:8080`.
+Browsing at `localhost:8080` lands on systemsite, which has no connector.
+
+**`SITE_HOST` must be a real hostname — never `localhost` or `127.0.0.1`.** Jahia rewrites site
+URLs to *absolute* ones built from `j:serverName`, so a loopback literal gets baked into every link
+on the site:
+
+```
+href="http://127.0.0.1:8080/home.html"
+href="http://127.0.0.1:8080/de/home.html"
+```
+
+which is meaningless to any client that is not this machine. `digitall.localhost` is a real name
+that still needs no hosts-file entry — browsers and glibc/systemd-resolved both map `*.localhost`
+to loopback.
 
 Afterwards:
 
 ```
 systemsite   serverName=localhost
-digitall     serverName=127.0.0.1
-resolve(localhost) -> systemsite     resolve(127.0.0.1) -> digitall
+digitall     serverName=digitall.localhost
+resolve(localhost) -> systemsite     resolve(digitall.localhost) -> digitall
 ```
 
 Changing `SITE_HOST` also means updating `redirectUris` and the `saml_assertion_consumer_url_*`
