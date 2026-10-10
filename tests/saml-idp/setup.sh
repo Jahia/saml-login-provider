@@ -32,19 +32,28 @@ if (( ${#MISSING[@]} )); then
     exit 1
 fi
 
-# Which site the connector is bound to. This is NOT a free choice: SAML2Util.findSiteKeyForRequest
-# resolves the site with getSiteByServerName(request.getServerName()), and saml-login-provider
-# redirects to /home.connect.saml with no siteKey parameter -- so the connector must live on
-# whatever site the browsing host resolves to. On a stock tests/ stack, 'localhost' resolves to
-# systemsite, not digitall; binding digitall there yields a connector nothing ever reaches
-# ("No SAML2 settings found for siteKey: systemsite").
+# The connector is bound to digitall, and the stack is made to reach it.
 #
-# To bind digitall instead, give digitall the server name you browse with
-# (Administration -> Sites -> digitall -> Web project settings -> Server name = localhost)
-# and set SITE_KEY=digitall.
-: "${SITE_KEY:=systemsite}"
-: "${POST_LOGIN_PATH:=/sites/digitall/home.html}"
-: "${JAHIA_PUBLIC_URL:=http://localhost:8080}"
+# SAML2Util.findSiteKeyForRequest resolves the site with
+# getSiteByServerName(request.getServerName()), and saml-login-provider redirects to
+# /home.connect.saml with no siteKey parameter. On a stock tests/ stack BOTH systemsite and
+# digitall carry j:serverName = localhost, systemsite wins, and every other host resolves to
+# null -- there is no fallback to the default site. So digitall is unreachable by any hostname
+# until one is mapped to it, and a connector bound to it would never be consulted.
+#
+# configure-site-host.groovy adds SITE_HOST to digitall's j:serverNameAliases (additive; it does
+# not touch systemsite, so localhost -> systemsite is unchanged). You then browse the SP at
+# SITE_HOST, which is why JAHIA_PUBLIC_URL defaults to 127.0.0.1 rather than localhost: it needs
+# no DNS entry and no hosts file.
+: "${SITE_KEY:=digitall}"
+: "${SITE_HOST:=127.0.0.1}"
+: "${POST_LOGIN_PATH:=/home.html}"
+: "${SUPER_USER_PASSWORD:=root1234}"
+: "${JAHIA_ADMIN_USER:=root}"
+# The SP base URL. Must use SITE_HOST, because that is the host that resolves to SITE_KEY.
+: "${JAHIA_PUBLIC_URL:=http://$SITE_HOST:8080}"
+# Jahia answers on localhost regardless; used for health checks and the provisioning API.
+JAHIA_LOCAL_URL=http://localhost:8080
 REALM=jahia-saml
 SP_ENTITY_ID=jahia-digitall
 KC_URL=http://localhost:8180
@@ -87,29 +96,57 @@ done
 
 log "Waiting for saml-authentication-valve to serve *.saml (up to 180s)"
 for _ in $(seq 1 60); do
-    # A started valve turns /home.connect.saml from 404-ish into a 400 "Error while trying to
-    # connect to SAML" (no connector yet) or a redirect (connector present). Anything but the
-    # unfiltered response means the filter is wired.
-    code=$(curl -s -o /dev/null -w '%{http_code}' "$JAHIA_PUBLIC_URL/home.connect.saml" || true)
-    if [[ "$code" == "400" || "$code" == "302" ]]; then
+    # Until the valve starts, /home.connect.saml is just an unknown page: 404. Once the filter
+    # is wired it answers 400 (no connector for this site), 200 (the HTTP-POST auto-submit form)
+    # or 302 (redirect binding). Test for "not 404" rather than allowlisting codes -- an
+    # allowlist of 400/302 spins for the full timeout the moment a connector is actually working.
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$JAHIA_LOCAL_URL/home.connect.saml" || true)
+    if [[ -n "$code" && "$code" != "404" && "$code" != "000" ]]; then
         echo "   valve is serving (HTTP $code)"
         break
     fi
     sleep 3
 done
 
+# ---------------------------------------------------------------- 1b. site hostname
+# Without this the connector below is bound to a site no request can resolve to. See the long
+# comment on SITE_KEY above and the header of configure-site-host.groovy.
+log "Mapping $SITE_HOST to site $SITE_KEY"
+sed -e "s/@@HOST@@/$SITE_HOST/g" -e "s/@@SITE@@/$SITE_KEY/g" \
+    configure-site-host.groovy > .configure-site-host.run.groovy
+echo '[{"executeScript":".configure-site-host.run.groovy"}]' > .provisioning.run.json
+curl -sf -u "$JAHIA_ADMIN_USER:$SUPER_USER_PASSWORD" \
+    -F script=@.provisioning.run.json \
+    -F file=@.configure-site-host.run.groovy \
+    "$JAHIA_LOCAL_URL/modules/api/provisioning" -o /dev/null
+rm -f .provisioning.run.json .configure-site-host.run.groovy
+docker exec jahia cat /tmp/slp-site-host.txt | sed 's/^/   /'
+
 # ---------------------------------------------------------------- 2. Keycloak
 log "Starting the Keycloak IdP"
 docker compose up -d
 
 log "Waiting for Keycloak to answer on $KC_URL"
+KC_READY=
 for _ in $(seq 1 60); do
     if curl -sf -o /dev/null "$KC_URL/realms/$REALM/protocol/saml/descriptor"; then
+        KC_READY=1
         echo "   realm $REALM is up"
+        break
+    fi
+    # Fail fast on a container that died rather than burning the full timeout. The realm
+    # importer uses a strict deserializer: one unknown field anywhere in the realm JSON (an
+    # attempted "_comment" key, say -- JSON has no comments) aborts startup with exit 1.
+    if [[ "$(docker inspect -f '{{.State.Running}}' slp-saml-idp-keycloak 2>/dev/null)" == "false" ]]; then
         break
     fi
     sleep 3
 done
+if [[ -z $KC_READY ]]; then
+    echo "ERROR: Keycloak did not come up. Last lines:" >&2
+    docker logs --tail 15 slp-saml-idp-keycloak 2>&1 | sed 's/^/   /' >&2
+    exit 1
+fi
 
 log "Setting the test user's password"
 docker exec slp-saml-idp-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
@@ -191,6 +228,10 @@ cat <<EOF
    SAML end user    $SAML_TEST_USER
    Jahia SP         $SP_ENTITY_ID  ->  $JAHIA_PUBLIC_URL/home.callback.saml
    Connector        site '$SITE_KEY', from $CFG
+   Site host        $SITE_HOST resolves to $SITE_KEY (localhost still resolves to systemsite)
+
+   Browse the SP at $JAHIA_PUBLIC_URL -- NOT at http://localhost:8080, which resolves to
+   systemsite and has no SAML connector.
 
 == One manual step remains -- the user mapper.
 
@@ -204,11 +245,12 @@ cat <<EOF
 
 == Then, to make saml-login-provider actually redirect you:
 
-   $JAHIA_PUBLIC_URL/jahia/administration/samlLoginProvider  ->  set the host list to: localhost
+   $JAHIA_PUBLIC_URL/jahia/administration/samlLoginProvider  ->  host list: $SITE_HOST
 
-   The module matches request.getServerName(), so 'localhost' is the right value when you
-   browse at localhost:8080 -- not 'jahia', which is only correct from inside the container
-   network. Log out, hit a protected page, and you should land on Keycloak.
+   The module matches request.getServerName(), so it must be the host you browse with
+   ($SITE_HOST) -- not 'jahia', which is only correct from inside the container network, and
+   not 'localhost' unless you also want systemsite enforced. Log out, hit a protected page,
+   and you should land on Keycloak.
 
 == If you lock yourself out (host configured but SAML broken):
 

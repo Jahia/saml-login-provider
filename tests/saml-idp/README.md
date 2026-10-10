@@ -34,9 +34,13 @@ already exported — whichever is present.
 | Keycloak admin | <http://localhost:8180/admin> |
 | Realm | `jahia-saml` |
 | SAML end user | `saml.tester` |
+| **Browse the SP at** | **<http://127.0.0.1:8080>** — this is what resolves to `digitall` |
 | Jahia SP entity ID | `jahia-digitall` |
-| ACS | `http://localhost:8080/home.callback.saml` |
-| Connector | OSGi factory config `org.jahia.modules.auth-<site>.cfg` |
+| ACS | `http://127.0.0.1:8080/home.callback.saml` |
+| Connector | site `digitall`, OSGi factory config `org.jahia.modules.auth-digitall.cfg` |
+
+`http://localhost:8080` still works for everything else, but it resolves to `systemsite`, which has
+no SAML connector — see *Things that are easy to get wrong* below.
 
 ### The one manual step: the user mapper
 
@@ -46,14 +50,15 @@ redirects normally, and **no Jahia session is created** — a silent no-op rathe
 
 Wire it once in the UI:
 
-> Administration → *(site)* → Authentication → SAML → **JCR Auth provider** →
+> Administration → **digitall** → Authentication → SAML → **JCR Auth provider** →
 > map the connector's `username` field to **Login username** (`ssoLoginId`, the only mandatory
 > one) → Save
 
 ### Then exercise saml-login-provider itself
 
-> `/jahia/administration/samlLoginProvider` → host list = `localhost`
+> `http://127.0.0.1:8080/jahia/administration/samlLoginProvider` → host list = `127.0.0.1`
 
+The module matches `request.getServerName()`, so the value must be the host you browse with.
 Log out, request a protected page, and you should be carried to Keycloak and back.
 
 ## Things that are easy to get wrong
@@ -81,13 +86,31 @@ it is the only one deployed. On the 3.x valve both modules bound one and the ord
 behaviour; on 4.x that contention disappears, so a bench built on 3.x would not have reflected
 what you ship against.
 
-**The connector must live on the site your browsing host resolves to.**
-`SAML2Util.findSiteKeyForRequest()` uses `getSiteByServerName(request.getServerName())`, and
-`saml-login-provider` redirects with no `siteKey` parameter. On a stock stack `localhost` resolves
-to **`systemsite`**, not `digitall` — binding `digitall` gives you a connector nothing reaches
-(`No SAML2 settings found for siteKey: systemsite`). Hence `SITE_KEY=systemsite` by default. To use
-`digitall`, first give it the server name you browse with (Administration → Sites → digitall → Web
-project settings → Server name), then set `SITE_KEY=digitall`.
+**The connector must live on the site your browsing host resolves to — and on a stock stack
+nothing resolves to `digitall`.** `SAML2Util.findSiteKeyForRequest()` uses
+`getSiteByServerName(request.getServerName())`, and `saml-login-provider` redirects with no
+`siteKey` parameter. Measured on a fresh `tests/` stack:
+
+```
+site=systemsite  serverName=localhost
+site=digitall    serverName=localhost
+resolve(localhost) -> systemsite     resolve(127.0.0.1) -> null
+resolve(jahia)     -> null           defaultSite        -> digitall
+```
+
+Both sites claim `localhost`, `systemsite` wins the lookup, and every other host resolves to
+**null** — there is no fallback to the default site even though that is `digitall`. So a connector
+bound to `digitall` is unreachable by construction, and you get
+`No SAML2 settings found for siteKey: systemsite`.
+
+`setup.sh` fixes this by adding `SITE_HOST` (default `127.0.0.1`) to **digitall's**
+`j:serverNameAliases` via `configure-site-host.groovy`, run through the provisioning API. It is
+additive — `systemsite` is not touched and `localhost → systemsite` still holds. You then browse
+the SP at `http://127.0.0.1:8080`; `127.0.0.1` needs no DNS entry or hosts file. Browsing at
+`localhost:8080` lands on systemsite, which has no connector.
+
+Changing `SITE_HOST` also means updating `redirectUris` and the `saml_assertion_consumer_url_*`
+attributes in `realm/jahia-saml-realm.json`.
 
 **The SP keystore must be supplied, not auto-generated.** `SAML2Util.validateSettings()` does
 generate one when `keyStore` is absent, but only in memory. A `.cfg` in `karaf/etc` is read-only
@@ -104,6 +127,18 @@ on the suffix (`connect` / `callback` / `metadata`). The sample config shipped i
 **Binary properties are base64.** `ConnectorConfig.getBinaryProperty()` is
 `Base64.getDecoder().decode(getProperty(...))`, so `identityProviderMetadata` and `keyStore` go into
 a flat `.cfg` as base64 strings.
+
+**The realm JSON admits no stray keys.** Keycloak's importer deserializes strictly: one unknown
+field anywhere — an attempted `"_comment"` key, say, since JSON has no comments — fails the import
+*and* aborts startup (`Failed to import realms` … `Unrecognized field`, exit 1). Explanations go in
+this file, not in the JSON. `setup.sh` now detects a Keycloak that exited and prints its last log
+lines rather than burning the full timeout and carrying on with a broken IdP.
+
+**`SAML2Client` instances are cached per siteKey.** `SAML2Util` keeps a `clients` map, and deleting
+a connector's `.cfg` does not evict it — the endpoint keeps serving a working AuthnRequest form from
+a config that no longer exists. Restart Jahia if you need a connector change to be truly clean.
+This also means "is the valve up?" must be tested as *not* 404: once a connector works the endpoint
+answers 200 (the HTTP-POST auto-submit form), not 400.
 
 **Container naming.** The IdP is `slp-saml-idp-keycloak`, deliberately *not* `saml-idp-keycloak` —
 that name belongs to the fixture in `jma-jahia-security-scan/docker/saml-idp.yml`. Port 8180 is

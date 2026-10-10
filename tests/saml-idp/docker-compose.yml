@@ -31,10 +31,12 @@ services:
             - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
             # Make every URL Keycloak mints (including the SAML SSO endpoint inside its own
             # metadata) point at the address the browser uses, not the container name.
-            - KC_HOSTNAME=localhost
-            - KC_HOSTNAME_PORT=8180
+            #
+            # Keycloak 25 defaults to hostname v2, where KC_HOSTNAME takes a full URL and
+            # KC_HOSTNAME_PORT / KC_HOSTNAME_STRICT_HTTPS no longer exist -- passing them only
+            # earns "UNAVAILABLE and will be ignored during build time" warnings in the log.
+            - KC_HOSTNAME=http://localhost:8180
             - KC_HOSTNAME_STRICT=false
-            - KC_HOSTNAME_STRICT_HTTPS=false
             - KC_HTTP_ENABLED=true
         volumes:
             - ./realm:/opt/keycloak/data/import:ro
