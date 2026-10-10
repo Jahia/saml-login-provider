@@ -58,17 +58,28 @@ Log out, request a protected page, and you should be carried to Keycloak and bac
 
 ## Things that are easy to get wrong
 
-**Module versions are not free.** `saml-authentication-valve 3.1.1` imports
-`org.jahia.modules.jahiaauth.service;version="[1.7,2)"`. `jahia-authentication 2.0.0` exports
-`2.0.0` and is therefore **outside that range** — install it and the valve never resolves, with no
-visible error beyond `/home.connect.saml` continuing to answer 400. `Jahia-Required-Version` is
-about the platform and says nothing about this. The resolvable set, pinned in `setup.sh`:
+**The three modules must come from the same generation.** They wire to each other through
+`org.jahia.modules.jahiaauth.service`, and the import ranges are narrow. Mix generations and a
+bundle silently fails to resolve — no error beyond `/home.connect.saml` continuing to answer 400.
+`Jahia-Required-Version` is about the platform and says nothing about this; all six versions below
+claim to support 8.2.3.0+, yet only same-generation sets actually work together.
 
-| Module | Version | Why |
+| Module | Version | Exports / imports `jahiaauth.service` |
 |---|---|---|
-| `jahia-authentication` | 1.8.1 | exports `1.8.1`, inside the valve's range |
-| `jcr-auth-provider` | 3.4.1 | imports `[1.0,2)` |
-| `saml-authentication-valve` | 3.1.1 | imports `[1.7,2)` |
+| `jahia-authentication` | 2.1.0 | exports `2.1.0` |
+| `jcr-auth-provider` | 4.2.0 | imports `[2.0,3)` |
+| `saml-authentication-valve` | 4.1.1 | imports `[2.0,3)` |
+
+The previous generation (`1.8.1` / `3.4.1` / `3.1.1`) is equally self-consistent — the 3.x valve
+imports `[1.7,2)` — but the two cannot be crossed in either direction. Check both ends before
+bumping any one of them.
+
+**The 4.x valve no longer registers a `LoginUrlProvider`.** `org.jahia.modules.saml2.providers.`
+`CustomLoginProvider` existed in 3.1.1 and is gone in 4.1.1. That matters here: `AGENTS.md` notes
+that core's `LogoutConfig` only ever consults the *first* bound provider, and this module assumes
+it is the only one deployed. On the 3.x valve both modules bound one and the ordering decided the
+behaviour; on 4.x that contention disappears, so a bench built on 3.x would not have reflected
+what you ship against.
 
 **The connector must live on the site your browsing host resolves to.**
 `SAML2Util.findSiteKeyForRequest()` uses `getSiteByServerName(request.getServerName())`, and

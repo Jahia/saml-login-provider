@@ -49,15 +49,22 @@ REALM=jahia-saml
 SP_ENTITY_ID=jahia-digitall
 KC_URL=http://localhost:8180
 
-# The ONLY resolvable combination on this platform. saml-authentication-valve 3.1.1 imports
-# org.jahia.modules.jahiaauth.service;version="[1.7,2)", so jahia-authentication 2.0.0 (which
-# exports 2.0.0) would leave the valve unresolved and /home.connect.saml still answering 400.
-# Jahia-Required-Version does NOT capture this; it is about the platform, not the package wiring.
+# These three must come from the SAME generation. They wire to each other through
+# org.jahia.modules.jahiaauth.service, and the ranges are narrow:
+#
+#   jahia-authentication 2.1.0  exports  2.1.0
+#   saml-authentication-valve   imports  [2.0,3)
+#   jcr-auth-provider           imports  [2.0,3)
+#
+# Mixing generations leaves a bundle unresolved with no visible error beyond
+# /home.connect.saml continuing to answer 400 -- e.g. the previous generation's valve 3.1.1
+# imports [1.7,2) and cannot wire to 2.x at all. Jahia-Required-Version does NOT capture this;
+# it is about the platform, not the package wiring. Check both ends before bumping any of them.
 M2=~/.m2/repository/org/jahia/modules
 MODULES=(
-    "$M2/jahia-authentication/1.8.1/jahia-authentication-1.8.1.jar"
-    "$M2/jcr-auth-provider/3.4.1/jcr-auth-provider-3.4.1.jar"
-    "$M2/saml-authentication-valve/3.1.1/saml-authentication-valve-3.1.1.jar"
+    "$M2/jahia-authentication/2.1.0/jahia-authentication-2.1.0.jar"
+    "$M2/jcr-auth-provider/4.2.0/jcr-auth-provider-4.2.0.jar"
+    "$M2/saml-authentication-valve/4.1.1/saml-authentication-valve-4.1.1.jar"
 )
 
 log() { echo "== $*"; }
@@ -165,6 +172,10 @@ Saml.forceAuth = false
 Saml.passive = false
 Saml.signAuthnRequest = false
 Saml.requireSignedAssertions = true
+# New in the 4.x valve: also demand a signature on the response envelope, not just the
+# assertion. Our Keycloak client signs both (saml.server.signature + saml.assertion.signature),
+# so flipping this to true is a valid stricter test; false is the module's own default.
+Saml.requireSignedResponses = false
 Saml.bindingType = urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST
 EOF
 
