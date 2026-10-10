@@ -98,16 +98,27 @@ resolve(localhost) -> systemsite     resolve(127.0.0.1) -> null
 resolve(jahia)     -> null           defaultSite        -> digitall
 ```
 
-Both sites claim `localhost`, `systemsite` wins the lookup, and every other host resolves to
-**null** — there is no fallback to the default site even though that is `digitall`. So a connector
-bound to `digitall` is unreachable by construction, and you get
+digitall is not *missing* a server name — it ships with the **same one systemsite has**. The lookup
+has two candidates, systemsite wins, and digitall's server name is dead config. Nothing else
+resolves either: there is no fallback to the default site even though that is `digitall`. So a
+connector bound to `digitall` is unreachable by construction, and you get
 `No SAML2 settings found for siteKey: systemsite`.
 
-`setup.sh` fixes this by adding `SITE_HOST` (default `127.0.0.1`) to **digitall's**
-`j:serverNameAliases` via `configure-site-host.groovy`, run through the provisioning API. It is
-additive — `systemsite` is not touched and `localhost → systemsite` still holds. You then browse
-the SP at `http://127.0.0.1:8080`; `127.0.0.1` needs no DNS entry or hosts file. Browsing at
-`localhost:8080` lands on systemsite, which has no connector.
+`setup.sh` fixes this by giving digitall its **own** `j:serverName` (= `SITE_HOST`, default
+`127.0.0.1`) via `configure-site-host.groovy`, run through the provisioning API. That is the field
+behind Administration → Sites → digitall → Web project settings → **Server name**, so the
+configuration is visible where you would look for it. `systemsite` is untouched and
+`localhost → systemsite` still holds. You then browse the SP at `http://127.0.0.1:8080`;
+`127.0.0.1` needs no DNS entry or hosts file. Browsing at `localhost:8080` lands on systemsite,
+which has no connector.
+
+Afterwards:
+
+```
+systemsite   serverName=localhost
+digitall     serverName=127.0.0.1
+resolve(localhost) -> systemsite     resolve(127.0.0.1) -> digitall
+```
 
 Changing `SITE_HOST` also means updating `redirectUris` and the `saml_assertion_consumer_url_*`
 attributes in `realm/jahia-saml-realm.json`.

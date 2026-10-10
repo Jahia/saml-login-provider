@@ -41,8 +41,11 @@ fi
 # null -- there is no fallback to the default site. So digitall is unreachable by any hostname
 # until one is mapped to it, and a connector bound to it would never be consulted.
 #
-# configure-site-host.groovy adds SITE_HOST to digitall's j:serverNameAliases (additive; it does
-# not touch systemsite, so localhost -> systemsite is unchanged). You then browse the SP at
+# digitall is not missing a server name -- it ships with the SAME one systemsite has, so the
+# lookup has two candidates, systemsite wins, and digitall's server name is dead config.
+# configure-site-host.groovy gives digitall its own distinct j:serverName (= SITE_HOST), which is
+# the field behind Administration -> Sites -> digitall -> Web project settings -> Server name.
+# systemsite is left alone, so localhost -> systemsite still holds. You then browse the SP at
 # SITE_HOST, which is why JAHIA_PUBLIC_URL defaults to 127.0.0.1 rather than localhost: it needs
 # no DNS entry and no hosts file.
 : "${SITE_KEY:=digitall}"
@@ -137,7 +140,7 @@ echo "   enabled on $SITE_KEY"
 # ---------------------------------------------------------------- 1b. site hostname
 # Without this the connector below is bound to a site no request can resolve to. See the long
 # comment on SITE_KEY above and the header of configure-site-host.groovy.
-log "Mapping $SITE_HOST to site $SITE_KEY"
+log "Setting server name $SITE_HOST on site $SITE_KEY"
 sed -e "s/@@HOST@@/$SITE_HOST/g" -e "s/@@SITE@@/$SITE_KEY/g" \
     configure-site-host.groovy > .configure-site-host.run.groovy
 echo '[{"executeScript":".configure-site-host.run.groovy"}]' > .provisioning.run.json
