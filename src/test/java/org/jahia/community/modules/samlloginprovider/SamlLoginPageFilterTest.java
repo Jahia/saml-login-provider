@@ -4,6 +4,8 @@ import org.jahia.utils.i18n.ResourceBundles;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -88,10 +90,11 @@ class SamlLoginPageFilterTest {
         verify(response).setHeader("X-Content-Type-Options", "nosniff");
         verify(response).setHeader(eq("Content-Security-Policy"), contains("default-src 'none'"));
         String rendered = body.toString();
-        assertThat(rendered).contains("<html lang=\"en\">");
-        assertThat(rendered).contains("action=\"/mySite/cms/login\"");
-        assertThat(rendered).contains("action=\"/mySite/home.connect.saml\"");
-        assertThat(rendered).doesNotContain("__");
+        assertThat(rendered)
+                .contains("<html lang=\"en\">")
+                .contains("action=\"/mySite/cms/login\"")
+                .contains("action=\"/mySite/home.connect.saml\"")
+                .doesNotContain("__");
     }
 
     @Test
@@ -156,42 +159,13 @@ class SamlLoginPageFilterTest {
         assertThat(body.toString()).doesNotContain("evil.example.com");
     }
 
-    @Test
-    void doFilter_redirectWithControlCharacter_isRejectedAndOmitted() throws Exception {
+    @ParameterizedTest(name = "redirect [{0}] is rejected")
+    @ValueSource(strings = {"/foo\nbar", "/foo:bar", "/foo\\bar"})
+    void doFilter_redirectWithControlCharColonOrBackslash_isRejectedAndOmitted(String redirect) throws Exception {
         // Arrange
         StringWriter body = new StringWriter();
         givenBasicGetRequest("", Locale.ENGLISH);
-        when(request.getParameter("redirect")).thenReturn("/foo\nbar");
-        when(response.getWriter()).thenReturn(new PrintWriter(body));
-
-        // Act
-        filter.doFilter(request, response, chain);
-
-        // Assert
-        assertThat(body.toString()).doesNotContain("name=\"redirect\"");
-    }
-
-    @Test
-    void doFilter_redirectWithColon_isRejectedAndOmitted() throws Exception {
-        // Arrange
-        StringWriter body = new StringWriter();
-        givenBasicGetRequest("", Locale.ENGLISH);
-        when(request.getParameter("redirect")).thenReturn("/foo:bar");
-        when(response.getWriter()).thenReturn(new PrintWriter(body));
-
-        // Act
-        filter.doFilter(request, response, chain);
-
-        // Assert
-        assertThat(body.toString()).doesNotContain("name=\"redirect\"");
-    }
-
-    @Test
-    void doFilter_redirectWithBackslash_isRejectedAndOmitted() throws Exception {
-        // Arrange
-        StringWriter body = new StringWriter();
-        givenBasicGetRequest("", Locale.ENGLISH);
-        when(request.getParameter("redirect")).thenReturn("/foo\\bar");
+        when(request.getParameter("redirect")).thenReturn(redirect);
         when(response.getWriter()).thenReturn(new PrintWriter(body));
 
         // Act
@@ -215,8 +189,9 @@ class SamlLoginPageFilterTest {
 
         // Assert
         String rendered = body.toString();
-        assertThat(rendered).doesNotContain("<script>");
-        assertThat(rendered).contains("&lt;script&gt;&quot;&lt;/script&gt;&amp;y=&#39;z&#39;");
+        assertThat(rendered)
+                .doesNotContain("<script>")
+                .contains("&lt;script&gt;&quot;&lt;/script&gt;&amp;y=&#39;z&#39;");
     }
 
     @Test
@@ -279,11 +254,10 @@ class SamlLoginPageFilterTest {
 
         // Assert
         String rendered = body.toString();
-        assertThat(rendered).contains(
-                "id=\"username\" maxlength=\"250\" required autocomplete=\"username\""
-                        + " aria-invalid=\"true\" aria-describedby=\"login-error\"");
-        assertThat(rendered).contains(
-                "id=\"password\" maxlength=\"250\" required autocomplete=\"current-password\""
+        assertThat(rendered)
+                .contains("id=\"username\" maxlength=\"250\" required autocomplete=\"username\""
+                        + " aria-invalid=\"true\" aria-describedby=\"login-error\"")
+                .contains("id=\"password\" maxlength=\"250\" required autocomplete=\"current-password\""
                         + " aria-invalid=\"true\" aria-describedby=\"login-error\"");
     }
 
