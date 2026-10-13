@@ -68,7 +68,7 @@ describe('Fallback to systemsite for a host no site declares', () => {
         })
     })
 
-    it('opens a Jahia session through systemsite\'s connector', () => {
+    it("opens a Jahia session through systemsite's connector", () => {
         cy.clearAllCookies()
         const acsUrl = new RegExp(`^${editUrl}/home\\.callback\\.saml\\?siteKey=${siteKey}(&|$)`)
 
