@@ -3,14 +3,16 @@
 `saml-login-provider` only decides **where** to send an unauthenticated visitor: on a configured
 host it redirects to `/home.connect.saml`. The `jahia-ee-dev` image serves 189 bundles and none of
 them is `jahia-authentication` or `saml-authentication-valve`, so out of the box that redirect
-target is a 400. The Cypress suite can therefore only assert *"the `Location` header looks right"*
-(`02-samlLoginRedirect.cy.ts`), never that the redirect leads anywhere.
+target is a 400 until something provides it.
 
-This fixture closes that gap: a real Keycloak IdP plus the authentication modules, wired so you can
-follow the redirect through a login and back into Jahia.
+This fixture provides it for **a browser on your machine**: a real Keycloak IdP plus the
+authentication modules, wired so you can follow the redirect through a login and back into Jahia.
 
-It is **not** part of CI. `tests/ci.startup.sh`, the provisioning manifests and the specs are
-untouched.
+CI covers the same round trip on its own: `03-samlAutoLogin.cy.ts` drives it against the `idp`
+service in `tests/docker-compose.yml`, on the `jahia.test` hostnames the cypress container can
+resolve. The two share the realm file and the Groovy scripts in `../cypress/fixtures/groovy/`, but
+not a Keycloak: this one is published on `127.0.0.1:8180` for your browser, the CI one on no host
+port at all. This directory itself is never part of the CI path.
 
 ## Use
 
@@ -22,7 +24,8 @@ cp .env.example .env                 # then edit the values
 ```
 
 `setup.sh` is idempotent. It deploys the modules, starts Keycloak, imports the realm, sets the test
-user's password, generates the SP keystore, and installs the connector config.
+user's password, has Jahia write the connector config (with a freshly generated SP keystore), waits
+until the connector answers, and only then sets the saml-login-provider host list.
 
 Configuration comes from `.env`, or from `SAML_IDP_ENV_FILE=/path/to/file`, or from variables
 already exported — whichever is present.
@@ -59,12 +62,16 @@ lookupUser(saml.tester) -> /users/ie/ie/ha/saml.tester
 The equivalent by hand is Administration → **digitall** → Authentication → SAML → **JCR Auth
 provider** → map `username` to **Login username** (`ssoLoginId`, the only mandatory field) → Save.
 
-### Then exercise saml-login-provider itself
+### saml-login-provider's host list (set automatically)
 
-> `http://digitall.localhost:8080/jahia/administration/samlLoginProvider` → host list = `digitall.localhost`
+`setup.sh` finishes by setting the host list to `SITE_HOST` through the module's GraphQL mutation —
+visible at `http://localhost:8080/jahia/administration/samlLoginProvider` (**Hosts**). It does so
+only after `/home.connect.saml` on `SITE_HOST` serves the auto-submit form to Keycloak: a host in
+that list without a working connector locks every unauthenticated visitor out.
 
-The module matches `request.getServerName()`, so the value must be the host you browse with.
-Log out, request a protected page, and you should be carried to Keycloak and back.
+The module matches `request.getServerName()`, so the value must be the host you browse with. Open
+`http://digitall.localhost:8080/start` in a private window: you should be carried to Keycloak and
+back, logged in.
 
 ## Things that are easy to get wrong
 
@@ -110,7 +117,7 @@ connector bound to `digitall` is unreachable by construction, and you get
 `No SAML2 settings found for siteKey: systemsite`.
 
 `setup.sh` fixes this by giving digitall its **own** `j:serverName` (= `SITE_HOST`, default
-`digitall.localhost`) via `configure-site-host.groovy`, run through the provisioning API. That is the field
+`digitall.localhost`) via `../cypress/fixtures/groovy/configureSiteHost.groovy`, run through the provisioning API. That is the field
 behind Administration → Sites → digitall → Web project settings → **Server name**, so the
 configuration is visible where you would look for it. `systemsite` is untouched and
 `localhost → systemsite` still holds. You then browse the SP at `http://digitall.localhost:8080`.
@@ -137,15 +144,19 @@ digitall     serverName=digitall.localhost
 resolve(localhost) -> systemsite     resolve(digitall.localhost) -> digitall
 ```
 
-Changing `SITE_HOST` also means updating `redirectUris` and the `saml_assertion_consumer_url_*`
-attributes in `realm/jahia-saml-realm.json`.
+Changing `SITE_HOST` also means adding it to `redirectUris` in `realm/jahia-saml-realm.json`. The
+ACS URL is deliberately *not* pinned in the realm: Keycloak takes it from each AuthnRequest and
+validates it against `redirectUris`, which is what lets this fixture (`digitall.localhost`) and CI
+(`digitall.jahia.test`) share one client definition.
 
 **The SP keystore must be supplied, not auto-generated.** `SAML2Util.validateSettings()` does
 generate one when `keyStore` is absent, but only in memory. A `.cfg` in `karaf/etc` is read-only
 (Felix logs `Adding READ_ONLY attribute to configuration` / `File is not writeable`), so it is never
 persisted and the next request fails with `keystoreResource cannot be null`. Auto-generation only
-works for connectors created through the admin UI, which are JCR-backed and writable. `setup.sh`
-therefore builds `sp-keystore.jks` with `keytool` and ships it as base64.
+works for connectors created through the admin UI, which are JCR-backed and writable.
+`configureSamlConnector.groovy` therefore builds the keystore itself — with Jahia's own `keytool`,
+inside the Jahia container, with random passphrases — and ships it as base64. Nothing about it
+touches the host or the repository, and the CI container (which has no JDK) needs nothing either.
 
 **`incomingTargetUrl` must end in `callback.saml`.** `SAML2Filter` matches `*.saml` and dispatches
 on the suffix (`connect` / `callback` / `metadata`). The sample config shipped inside the module
@@ -156,9 +167,8 @@ on the suffix (`connect` / `callback` / `metadata`). The sample config shipped i
 beginning with `[` or `(` as an array/vector, and `"` as a quoted token — so wrapping the mapper's
 JSON array in quotes leaves the quotes *in* the value and
 `ConnectorConfig.initMappers` fails with `A JSONArray text must start with '['`. Backslash is the
-escape character: the leading bracket and every inner quote must be `\`-escaped. In `setup.sh` the
-mapping is held in a single-quoted variable so the shell does not eat the backslashes before the
-heredoc interpolates it.
+escape character: the leading bracket and every inner quote must be `\`-escaped, which
+`configureSamlConnector.groovy` does when it writes the mapping.
 
 **Binary properties are base64.** `ConnectorConfig.getBinaryProperty()` is
 `Base64.getDecoder().decode(getProperty(...))`, so `identityProviderMetadata` and `keyStore` go into
@@ -175,6 +185,13 @@ the provisioning API (`{"enable": "...", "site": "..."}`).
 
 `saml-login-provider` is deliberately *not* enabled on any site: it is a server-level module whose
 admin route lives under Server settings and whose permission is checked on the JCR root node.
+
+**A SAML protocol mapper must not repeat its attribute name as `friendly.name`.** pac4j files each
+assertion attribute under its `Name` *and* under its `FriendlyName`; when the two are equal the
+values merge into a two-element list, and jcr-auth-provider stores its string form. The visible
+symptom is a header greeting `[Saml, Saml] [Tester, Tester]` instead of `Saml Tester`. The realm's
+mappers therefore set `attribute.name` only. A login rewrites the mapped properties, so an
+existing user heals on its next login.
 
 **The realm JSON admits no stray keys.** Keycloak's importer deserializes strictly: one unknown
 field anywhere — an attempted `"_comment"` key, say, since JSON has no comments — fails the import

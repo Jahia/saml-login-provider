@@ -31,5 +31,29 @@
 - importSite: "jar:mvn:org.jahia.modules/digitall/RELEASE/zip/import!/Digitall.zip"
 - karafCommand: "log:log 'END - Import Digitall site'"
 
+# The SAML stack saml-login-provider hands off to (spec 03 drives a full login through it).
+# These three must come from the SAME generation -- they wire to each other through
+# org.jahia.modules.jahiaauth.service and the import ranges are narrow (jahia-authentication 2.1.0
+# exports 2.1.0; the valve and jcr-auth-provider import [2.0,3)). A mixed generation leaves a
+# bundle unresolved with no error beyond /home.connect.saml answering 400. Keep these versions in
+# step with saml-idp/setup.sh.
+- karafCommand: "log:log 'START - Install SAML authentication bundles'"
+- installBundle:
+      - 'mvn:org.jahia.modules/jahia-authentication/2.1.0'
+      - 'mvn:org.jahia.modules/jcr-auth-provider/4.2.0'
+      - 'mvn:org.jahia.modules/saml-authentication-valve/4.1.1'
+  autoStart: true
+  uninstallPreviousVersion: true
+# Deploying starts the bundles, but does not enable them on any site. The SAML2Filter is global
+# and works either way; what needs site enablement is the per-site Authentication settings UI
+# where the connector and its mapper are visible.
+- enable: 'jahia-authentication'
+  site: 'digitall'
+- enable: 'jcr-auth-provider'
+  site: 'digitall'
+- enable: 'saml-authentication-valve'
+  site: 'digitall'
+- karafCommand: "log:log 'END - Install SAML authentication bundles'"
+
 - karafCommand: "log:log 'END - provisioning'"
 

@@ -23,7 +23,8 @@
  * Any leftover @@HOST@@ entry in j:serverNameAliases is removed, so the host is declared in
  * exactly one place.
  *
- * @@HOST@@ and @@SITE@@ are substituted by setup.sh.
+ * @@HOST@@ and @@SITE@@ are substituted by saml-idp/setup.sh (sed) and by the Cypress specs
+ * (cy.executeGroovy replacements), so the manual fixture and CI share this one script.
  */
 import org.jahia.services.content.*
 import org.jahia.services.sites.JahiaSitesService
