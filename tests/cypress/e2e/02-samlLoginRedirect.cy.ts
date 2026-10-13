@@ -1,4 +1,4 @@
-import { DocumentNode } from 'graphql'
+import { locationOf, requestUntil, setSamlLoginProviderHosts } from '../utils/samlLoginProvider'
 
 describe('SAML Login redirect behavior', () => {
     // Requests issued by cy.request()/cy.visit() inside the docker network hit
@@ -10,43 +10,35 @@ describe('SAML Login redirect behavior', () => {
     const choiceLoginPath = '/saml-login'
     const samlConnectPath = '/home.connect.saml'
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const updateSamlLoginProviderConfig: DocumentNode = require('graphql-tag/loader!../fixtures/graphql/mutation/updateSamlLoginProviderConfig.graphql')
-
-    function setFqdn(fqdn: string | null) {
-        cy.login()
-        cy.apollo({ mutation: updateSamlLoginProviderConfig, variables: { fqdn } })
-    }
-
     afterEach(() => {
         // The configuration is server-wide: always leave a clean baseline
         // behind for other specs.
-        setFqdn(null)
+        setSamlLoginProviderHosts(null)
     })
 
     it('redirects an unauthenticated request straight to the SAML connect endpoint on a configured host', () => {
-        setFqdn(configuredHost)
+        setSamlLoginProviderHosts(configuredHost)
         cy.clearCookies()
 
-        cy.request({ url: protectedPath, followRedirect: false, failOnStatusCode: false }).then((response) => {
+        // The new host list reaches the provider asynchronously: poll for its effect rather than
+        // racing it (see requestUntil).
+        requestUntil({ url: protectedPath }, (r) => locationOf(r).includes(samlConnectPath)).then((response) => {
             expect(response.status, 'unauthenticated request should be redirected').to.be.oneOf([
                 301, 302, 303, 307, 401,
             ])
-            const location = (response.redirectedToUrl || response.headers.location || '') as string
-            expect(location).to.include(samlConnectPath)
+            expect(locationOf(response)).to.include(samlConnectPath)
         })
     })
 
     it('sends an unauthenticated request to the choice login page on a non-configured host', () => {
-        setFqdn(nonConfiguredHost)
+        setSamlLoginProviderHosts(nonConfiguredHost)
         cy.clearCookies()
 
-        cy.request({ url: protectedPath, followRedirect: false, failOnStatusCode: false }).then((response) => {
+        requestUntil({ url: protectedPath }, (r) => locationOf(r).includes(choiceLoginPath)).then((response) => {
             expect(response.status, 'unauthenticated request should be redirected').to.be.oneOf([
                 301, 302, 303, 307, 401,
             ])
-            const location = (response.redirectedToUrl || response.headers.location || '') as string
-            expect(location).to.include(choiceLoginPath)
+            expect(locationOf(response)).to.include(choiceLoginPath)
         })
     })
 
