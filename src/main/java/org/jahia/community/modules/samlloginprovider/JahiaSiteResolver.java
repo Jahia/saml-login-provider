@@ -1,5 +1,7 @@
 package org.jahia.community.modules.samlloginprovider;
 
+import org.jahia.api.Constants;
+import org.jahia.services.content.JCRTemplate;
 import org.jahia.services.content.decorator.JCRSiteNode;
 import org.jahia.services.sites.JahiaSitesService;
 import org.osgi.service.component.annotations.Component;
@@ -15,13 +17,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 /**
  * {@link SiteResolver} built from every site's server name, aliases and installed modules, read
- * through {@link JahiaSitesService}.
+ * through {@link JahiaSitesService} with a system session in the default workspace, as core's own
+ * host lookup does: the index never depends on what the current caller is allowed to read.
  *
  * <p>For a host declared by exactly one site this agrees with the lookup the SAML connect endpoint
  * uses to pick its connector ({@code getSitenameByServerName}, case-insensitive, no default-site
@@ -31,7 +35,10 @@ import java.util.function.Supplier;
  *
  * <p>The routing index is cached for {@value #ROUTING_CACHE_TTL_MS} ms: it sits on the login path
  * of every anonymous request. A server name or module change therefore reaches routing within that
- * delay. Validation ({@link #sitesClaiming}, {@link #serverNamesOf}) always reads fresh data.
+ * delay. Once expired, a single caller rebuilds it while the others keep the stale snapshot, so an
+ * expiry under load costs one walk of the sites, not one per request. Only the very first build,
+ * when there is no snapshot yet, makes callers wait. Validation ({@link #sitesClaiming},
+ * {@link #serverNamesOf}) always reads fresh data.
  */
 @Component(service = SiteResolver.class, immediate = true)
 public class JahiaSiteResolver implements SiteResolver {
@@ -75,6 +82,9 @@ public class JahiaSiteResolver implements SiteResolver {
     private final Supplier<Map<String, SiteInfo>> siteInfos;
     private final LongSupplier clock;
     private final AtomicReference<Snapshot> routingIndex = new AtomicReference<>();
+    /** Claimed by the one caller rebuilding an expired snapshot. */
+    private final AtomicBoolean refreshing = new AtomicBoolean();
+    private final Object firstBuildLock = new Object();
 
     public JahiaSiteResolver() {
         this(JahiaSiteResolver::readSites, System::currentTimeMillis);
@@ -117,12 +127,32 @@ public class JahiaSiteResolver implements SiteResolver {
     private Snapshot routingIndex() {
         long now = clock.getAsLong();
         Snapshot current = routingIndex.get();
-        if (current == null || now - current.readAt > ROUTING_CACHE_TTL_MS) {
-            // Concurrent rebuilds are harmless: each snapshot is complete and immutable, last one wins.
-            current = new Snapshot(now, safeRead());
-            routingIndex.set(current);
+        if (current == null) {
+            return firstBuild(now);
         }
-        return current;
+        if (now - current.readAt <= ROUTING_CACHE_TTL_MS || !refreshing.compareAndSet(false, true)) {
+            // Fresh, or another caller is already rebuilding it: the stale snapshot is good enough
+            return current;
+        }
+        try {
+            Snapshot fresh = new Snapshot(now, safeRead());
+            routingIndex.set(fresh);
+            return fresh;
+        } finally {
+            refreshing.set(false);
+        }
+    }
+
+    /** No snapshot to fall back on yet: callers wait for one build instead of each reading the sites. */
+    private Snapshot firstBuild(long now) {
+        synchronized (firstBuildLock) {
+            Snapshot current = routingIndex.get();
+            if (current == null) {
+                current = new Snapshot(now, safeRead());
+                routingIndex.set(current);
+            }
+            return current;
+        }
     }
 
     /** A read failure means "no site": the caller then leaves the login flow alone. */
@@ -144,26 +174,47 @@ public class JahiaSiteResolver implements SiteResolver {
         return Map.copyOf(immutable);
     }
 
+    /**
+     * Reads every site through a system session in the default workspace, like core's
+     * {@code getSitenameByServerName}: the caller's own session would hide the sites it cannot read.
+     * Every property is read inside the callback, which returns only plain values: the session is
+     * logged out as soon as the callback returns, and a site node read after that has lost its data.
+     */
     private static Map<String, SiteInfo> readSites() {
-        List<JCRSiteNode> sites;
         try {
-            sites = JahiaSitesService.getInstance().getSitesNodeList();
+            // A null user means the root system session, as JCRSessionFactory.getCurrentSystemSession
+            return JCRTemplate.getInstance().doExecuteWithSystemSessionAsUser(null, Constants.EDIT_WORKSPACE, null,
+                    session -> toSiteInfos(JahiaSitesService.getInstance().getSitesNodeList(session)));
         } catch (RepositoryException e) {
             throw new IllegalStateException("Could not list the sites", e);
         }
+    }
+
+    /** Must run while the session the sites were read from is still open. */
+    private static Map<String, SiteInfo> toSiteInfos(List<JCRSiteNode> sites) {
         Map<String, SiteInfo> infos = new HashMap<>();
         for (JCRSiteNode site : sites) {
-            List<String> names = new ArrayList<>();
-            names.add(site.getServerName());
-            if (site.getServerNameAliases() != null) {
-                names.addAll(site.getServerNameAliases());
+            String siteKey = site.getSiteKey();
+            if (siteKey == null) {
+                LOGGER.debug("Skipping site node {}: it has no site key", site.getPath());
+                continue;
             }
-            Set<String> lowerCased = new HashSet<>();
-            names.stream().filter(Objects::nonNull).map(JahiaSiteResolver::lower).forEach(lowerCased::add);
-            Set<String> modules = site.getInstalledModulesWithAllDependencies();
-            infos.put(site.getSiteKey(), new SiteInfo(lowerCased, modules == null ? Set.of() : modules));
+            infos.put(siteKey, siteInfoOf(site));
         }
         return Map.copyOf(infos);
+    }
+
+    private static SiteInfo siteInfoOf(JCRSiteNode site) {
+        List<String> names = new ArrayList<>();
+        names.add(site.getServerName());
+        List<String> aliases = site.getServerNameAliases();
+        if (aliases != null) {
+            names.addAll(aliases);
+        }
+        Set<String> lowerCased = new HashSet<>();
+        names.stream().filter(Objects::nonNull).map(JahiaSiteResolver::lower).forEach(lowerCased::add);
+        Set<String> modules = site.getInstalledModulesWithAllDependencies();
+        return new SiteInfo(lowerCased, modules == null ? Set.of() : modules);
     }
 
     private static String lower(String value) {
