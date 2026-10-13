@@ -267,7 +267,8 @@ for entry in "${SAML_SITES[@]}"; do
         SP_ENTITY_ID="jahia-$site" \
         SP_BASE_URL="$(site_url "$host")" \
         IDP_METADATA_URL="$KC_INTERNAL_URL/realms/$REALM/protocol/saml/descriptor" \
-        POST_LOGIN_PATH="$POST_LOGIN_PATH"
+        POST_LOGIN_PATH="$POST_LOGIN_PATH" \
+        INCOMING_TARGET_URL=/home.callback.saml
 done
 
 # Felix FileInstall picks each .cfg up asynchronously. The valve answers 400 for a host until it

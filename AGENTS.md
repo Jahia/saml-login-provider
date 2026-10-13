@@ -3,7 +3,8 @@
 Jahia OSGi module that replaces the login page of a site with a SAML-aware one. On a site where the
 module is **enabled** and that has **SAML authentication set up** (an enabled saml-authentication-valve
 connector), unauthenticated visitors get `/saml-login` (credentials form + "Sign in with Google"),
-and the hosts in that site's list go straight to the SAML connect endpoint. Admin UI at
+and the hosts in that site's list go straight to the SAML connect endpoint. A host that no site
+declares (typically the editing host) falls back to systemsite's settings. Admin UI at
 `/jahia/administration/<siteKey>/samlLoginProvider` (the site's administration, shown only where
 the module is enabled).
 
@@ -17,7 +18,8 @@ the module is enabled).
   (`karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, properties `siteKey`,
   `fqdn`), not JCR — see `FileSiteHostsStore`
 - Fail-safe default: a site where the module is not enabled, a site with no SAML connector, and a
-  host resolving to no single site all keep Jahia's stock login
+  host declared by several sites all keep Jahia's stock login; so does a host no site declares
+  unless systemsite qualifies
 
 ## Architecture
 
@@ -27,7 +29,8 @@ the module is enabled).
 | `SamlSetup` / `JahiaAuthSamlSetup` | Whether a site has an enabled SAML connector (`SettingsService.getConnectorConfig(site, "Saml")`, property `enabled`) |
 | `SamlLoginPageFilter` | Serves `/saml-login` (credentials form + "Sign in with Google") |
 | `SiteHostsStore` / `FileSiteHostsStore` | Per-site host lists; the file-backed `ManagedServiceFactory` (factory PID `org.jahia.community.samlloginprovider.site`) that reads and atomically writes one `.cfg` per site |
-| `SiteResolver` / `JahiaSiteResolver` | Host → site key (`JahiaSitesService.getSitenameByServerName`, the lookup the SAML connect endpoint uses) and site → its server names |
+| `SiteResolver` / `JahiaSiteResolver` | Host → the ONE site declaring it, whether no site declares it (`isUnclaimed`), site → its server names and whether the module is enabled on it. Reads every site through a system session; the routing index is cached 5 s, validation reads are fresh |
+| `LoginSite` | The site governing a host's login: its own unique site, `systemsite` (fallback) when no site declares it, none when several do. Shared by the provider and the filter |
 | `HostList` | Parsing/validation of the comma-separated `fqdn` host list |
 | `WebUtils` | Shared URL-encoding and site-key validation helpers |
 | `SamlLoginProviderQueryExtension` / `MutationExtension` | Publish the single `samlLoginProvider` namespace field on `DXGraphQLProvider.Query` / `Mutation` |
@@ -35,7 +38,7 @@ the module is enabled).
 | `SamlLoginProviderQuery` / `SamlLoginProviderMutation` | Namespace containers holding the actual `config` / `update` operations |
 | `SamlLoginProviderPermissions` | Site-admin permission gate shared by both containers (checks the site node) |
 | `SamlLoginProviderServices` | OSGi lookups for the GraphQL containers (instantiated by graphql-java, so no injection) |
-| `GqlSamlLoginProviderConfig` | GraphQL return type (`{siteKey, fqdn, serverNames}`) |
+| `GqlSamlLoginProviderConfig` | GraphQL return type (`{siteKey, fqdn, serverNames, samlConfigured}`) |
 
 ## GraphQL API
 
@@ -45,8 +48,8 @@ avoiding cross-module field name collisions in the platform-wide GraphQL schema.
 
 | Operation | Name | Notes |
 |-----------|------|-------|
-| Query | `samlLoginProvider { config(siteKey: String!) }` → `GqlSamlLoginProviderConfig` | The site's list plus `serverNames`, the only values the list may contain |
-| Mutation | `samlLoginProvider { update(siteKey: String!, fqdn) }` → `GqlSamlLoginProviderConfig` | Empty/null `fqdn` turns the module off for that site; every host must be the site's server name or an alias |
+| Query | `samlLoginProvider { config(siteKey: String!) }` → `GqlSamlLoginProviderConfig` | The site's list, its `serverNames`, and `samlConfigured` (enabled SAML connector) |
+| Mutation | `samlLoginProvider { update(siteKey: String!, fqdn) }` → `GqlSamlLoginProviderConfig` | Empty/null `fqdn`: nobody goes straight to SAML (the site's hosts get the choice page). Every host must be the site's server name or an alias, declared by no other site; systemsite may also list hosts no site declares |
 
 Permission: `siteAdminSamlLoginProvider` — a **site-level** permission (declared under
 `site-admin` in `permissions.xml`), checked via `callerSession.getNode("/sites/<siteKey>")
@@ -85,8 +88,12 @@ yarn install
 - Specs cover: reading/saving the host list, validation errors, the `/saml-login` /
   `/home.connect.saml` redirect behavior for configured vs. non-configured hosts, and (spec 03)
   the full auto-login round trip through a real Keycloak — the `idp` compose service, with the
-  SAML modules provisioned on digitall — ending in a Jahia session with the mapped attributes
-- Spec 03 runs only inside the compose network (`digitall.jahia.test` / `idp.jahia.test` aliases);
+  SAML modules provisioned on digitall — ending in a Jahia session with the mapped attributes, and
+  (spec 04) the systemsite fallback on `edit.jahia.test`, a host no site declares: choice page,
+  `siteKey=systemsite` in the Google form and the connect URL, and a login through systemsite's
+  connector (whose callback is `/home.callback.saml?siteKey=systemsite`)
+- Specs 03/04 run only inside the compose network (`digitall.jahia.test` / `edit.jahia.test` /
+  `idp.jahia.test` aliases);
   see `tests/README.md` for iterating on it without rebuilding the image
 - The host list reaches `SamlLoginUrlProvider` asynchronously (ConfigurationAdmin), a fraction of
   a second after the mutation returns: specs poll for its effect (`cypress/utils/samlLoginProvider.ts`)
@@ -117,6 +124,17 @@ yarn install
   lookup returns an arbitrary match, so `JahiaSiteResolver.siteKeyFor` only resolves a host
   declared by exactly one site. Its routing index is cached for 5 s (the login path is hot);
   validation (`sitesClaiming`, `serverNamesOf`) always reads fresh data.
+- **A host that NO site declares falls back to systemsite** (`LoginSite`) — never a shared host.
+  This is the one deliberate exception to "a list only affects its own site": systemsite's admin is
+  effectively the server admin, and nobody else governs such hosts. Keep three things in step:
+  `JahiaSiteResolver.isUnclaimed` must stay `false` when the sites could not be read (otherwise a
+  read failure would send every host to systemsite); every SAML URL for a fallback host must carry
+  `siteKey=systemsite` (the valve's `SAML2Util.findSiteKeyForRequest` reads that parameter first,
+  else resolves the host, finds no site and answers 400) — the provider adds it to the connect URL,
+  the filter adds a hidden field to the Google form; and systemsite's connector needs
+  `Saml.incomingTargetUrl = /home.callback.saml?siteKey=systemsite` and its `serverLocation` on the
+  editing host, or the IdP's callback cannot find the connector either. A host later declared by a
+  site leaves systemsite's governance: systemsite's stored entry for it is then simply ignored.
 - A file only configures the site its name says: `FileSiteHostsStore.updated` rejects a `siteKey`
   that does not match `felix.fileinstall.filename`, and `save` refuses to overwrite or delete a file
   holding another site's key (site keys differing only by case collide on case-insensitive
@@ -130,8 +148,9 @@ yarn install
   assumes it is the only one deployed; do not silently rely on multiple providers cooperating.
 - `resolveOriginalUrl` must keep returning `null` for `.saml`/`/saml-login` suffixed URLs — otherwise
   the choice page or the SAML endpoint itself could become a post-login redirect target (loop).
-- **Login lockout risk**: every host added to a site's list must be served by a working
-  saml-authentication-valve connector for that site. If a host is added
-  without SAML valve setup, users are redirected to `/home.connect.saml` (a 400 error with no
-  fallback), locking them out entirely. The `HostList.isValid()` method validates hostname syntax
-  but not SAML valve deployment — operators must verify prerequisites before adding hosts.
+- **Login lockout risk**: routing requires an *enabled* connector (`SamlSetup`), so a listed host is
+  never sent to SAML on a site with none — but an enabled connector that is broken (wrong IdP
+  metadata, a systemsite connector without `?siteKey=systemsite` in its callback, an IdP that does
+  not accept the callback URL) still fails the login of every listed host, with no form to fall
+  back to. Verify the connector end to end on an unlisted host (the choice page's Google button)
+  before listing hosts; `/cms/login` keeps working for local accounts either way.

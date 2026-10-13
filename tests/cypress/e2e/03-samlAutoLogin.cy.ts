@@ -6,6 +6,7 @@ import {
     setSamlLoginProviderHosts,
     setUpDigitallForSaml,
 } from '../utils/samlLoginProvider'
+import { loginThroughIdp, randomSecret, resetIdpUserPassword, SAML_USER } from '../utils/idp'
 
 // Full auto-login round trip: an unauthenticated visitor on a configured host is sent by
 // saml-login-provider to /home.connect.saml, the valve hands them to a real Keycloak, and the
@@ -25,61 +26,19 @@ describe('SAML auto login', () => {
     const siteUrl = `http://${siteHost}:8080`
     const idpUrl = IDP.url
     const realm = IDP.realm
-    // The IdP user and the names the realm file gives it.
-    const samlUser = 'saml.tester'
-    const samlFirstName = 'Saml'
-    const samlLastName = 'Tester'
+    const samlUser = SAML_USER.username
+    const samlFirstName = SAML_USER.firstName
+    const samlLastName = SAML_USER.lastName
     const samlConnectPath = '/home.connect.saml'
     // Protected: an anonymous request is a 401 that saml-login-provider turns into a redirect.
     const protectedPath = '/start'
 
     // A fresh password for the IdP user on every run, so no credential is stored anywhere.
-    // crypto.randomUUID() is unavailable here: the spec runs on http://, not a secure context.
-    function randomSecret(): string {
-        const bytes = new Uint8Array(24)
-        crypto.getRandomValues(bytes)
-        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-    }
-
     const samlPassword = randomSecret()
-
-    function resetIdpUserPassword() {
-        cy.request({
-            method: 'POST',
-            url: `${idpUrl}/realms/master/protocol/openid-connect/token`,
-            form: true,
-            log: false,
-            // OAuth 2.0 wire field names, fixed by the token endpoint.
-            body: {
-                // eslint-disable-next-line camelcase
-                grant_type: 'password',
-                // eslint-disable-next-line camelcase
-                client_id: 'admin-cli',
-                username: Cypress.env('KEYCLOAK_ADMIN'),
-                password: Cypress.env('KEYCLOAK_ADMIN_PASSWORD'),
-            },
-        }).then((tokenResponse) => {
-            const auth = { bearer: tokenResponse.body.access_token as string }
-            cy.request({
-                url: `${idpUrl}/admin/realms/${realm}/users`,
-                qs: { username: samlUser, exact: true },
-                auth,
-            }).then((usersResponse) => {
-                expect(usersResponse.body, `IdP user ${samlUser}`).to.have.length(1)
-                cy.request({
-                    method: 'PUT',
-                    url: `${idpUrl}/admin/realms/${realm}/users/${usersResponse.body[0].id}/reset-password`,
-                    auth,
-                    log: false,
-                    body: { type: 'password', value: samlPassword, temporary: false },
-                })
-            })
-        })
-    }
 
     before(() => {
         setUpDigitallForSaml()
-        resetIdpUserPassword()
+        resetIdpUserPassword(samlPassword)
 
         setSamlLoginProviderHosts(siteKey, siteHost)
         requestUntil({ url: `${siteUrl}${protectedPath}` }, (r) => locationOf(r).includes(samlConnectPath)).then(
@@ -141,38 +100,10 @@ describe('SAML auto login', () => {
                 expect(locationOf(anonymous), 'redirect of an anonymous request').to.include(samlConnectPath)
                 return cy.request(new URL(locationOf(anonymous), siteUrl).href)
             })
-            .then((connect) => {
-                const authnRequest = parseForm(connect.body, 'form', siteUrl)
-                expect(authnRequest.action, 'AuthnRequest target').to.eq(`${idpUrl}/realms/${realm}/protocol/saml`)
-                expect(authnRequest.fields, 'AuthnRequest form').to.have.property('SAMLRequest')
-                return cy.request({ method: 'POST', url: authnRequest.action, form: true, body: authnRequest.fields })
-            })
-            .then((loginPage) => {
-                const login = parseForm(loginPage.body, '#kc-form-login', idpUrl)
-                return cy.request({
-                    method: 'POST',
-                    url: login.action,
-                    form: true,
-                    log: false,
-                    body: { ...login.fields, username: samlUser, password: samlPassword },
-                })
-            })
-            .then((idpAnswer) => {
-                const samlResponse = parseForm(idpAnswer.body, 'form', idpUrl)
-                // Pac4j appends ?client_name=SAML2Client to the ACS URL it advertises.
-                expect(samlResponse.action, 'assertion consumer service').to.match(
-                    new RegExp(`^${siteUrl}/home\\.callback\\.saml(\\?|$)`),
-                )
-                expect(samlResponse.fields, 'IdP answer').to.have.property('SAMLResponse')
-                return cy.request({
-                    method: 'POST',
-                    url: samlResponse.action,
-                    form: true,
-                    body: samlResponse.fields,
-                    followRedirect: false,
-                    failOnStatusCode: false,
-                })
-            })
+            // Pac4j appends ?client_name=SAML2Client to the ACS URL it advertises.
+            .then((connect) =>
+                loginThroughIdp(connect, siteUrl, samlPassword, new RegExp(`^${siteUrl}/home\\.callback\\.saml(\\?|$)`)),
+            )
             .then((callback) => {
                 expect(callback.status, 'callback answer').to.be.oneOf([302, 303])
                 expect(locationOf(callback), 'back to the page first asked for').to.include(protectedPath)
@@ -205,19 +136,3 @@ describe('SAML auto login', () => {
         })
     })
 })
-
-interface ParsedForm {
-    action: string
-    fields: Record<string, string>
-}
-
-/** The first form matching selector in an HTML page: absolute action URL and named input values. */
-function parseForm(html: string, selector: string, pageUrl: string): ParsedForm {
-    const form = new DOMParser().parseFromString(html, 'text/html').querySelector<HTMLFormElement>(selector)
-    expect(form, `${selector} in the page`).to.not.be.null
-    const fields: Record<string, string> = {}
-    form.querySelectorAll<HTMLInputElement>('input[name]').forEach((input) => {
-        fields[input.name] = input.value
-    })
-    return { action: new URL(form.getAttribute('action') ?? '', pageUrl).href, fields }
-}

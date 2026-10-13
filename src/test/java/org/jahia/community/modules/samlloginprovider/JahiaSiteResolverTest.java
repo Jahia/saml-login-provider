@@ -74,6 +74,15 @@ class JahiaSiteResolverTest {
     }
 
     @Test
+    void isUnclaimed_onlyForAHostNoSiteDeclares() {
+        assertThat(resolver.isUnclaimed("edit.example.com")).isTrue();
+        assertThat(resolver.isUnclaimed("digitall.example.com")).isFalse();
+        // declared by two sites: claimed, just not by a single one
+        assertThat(resolver.isUnclaimed("localhost")).isFalse();
+        assertThat(resolver.isUnclaimed(null)).isFalse();
+    }
+
+    @Test
     void isModuleEnabled_followsTheSiteInstalledModules() {
         assertThat(resolver.isModuleEnabled("digitall")).isTrue();
         assertThat(resolver.isModuleEnabled("other")).isFalse();
@@ -131,7 +140,11 @@ class JahiaSiteResolverTest {
 
         assertThat(failing.siteKeyFor("digitall.example.com")).isNull();
         assertThat(failing.isModuleEnabled("digitall")).isFalse();
-        assertThat(failing.sitesClaiming("digitall.example.com")).isEmpty();
+        // unknown is not "no site": a failed read must never send every host to systemsite
+        assertThat(failing.isUnclaimed("edit.example.com")).isFalse();
+        // validation fails closed: an empty answer would let systemsite list any host
+        assertThatThrownBy(() -> failing.sitesClaiming("digitall.example.com"))
+                .isInstanceOf(IllegalStateException.class);
         assertThat(failing.serverNamesOf("digitall")).isEmpty();
     }
 
@@ -171,7 +184,10 @@ class JahiaSiteResolverTest {
     void routingRefresh_failingRebuild_releasesTheRefreshForTheNextCaller() {
         // Arrange: a warm index, then expired, then one rebuild that blows up
         AtomicInteger calls = new AtomicInteger();
-        JahiaSiteResolver flaky = new JahiaSiteResolver(() -> calls.incrementAndGet() == 2 ? null : sites.get(), now::get);
+        // a site without info passes the guarded read, then breaks the index build
+        Map<String, SiteInfo> broken = new java.util.HashMap<>();
+        broken.put("digitall", null);
+        JahiaSiteResolver flaky = new JahiaSiteResolver(() -> calls.incrementAndGet() == 2 ? broken : sites.get(), now::get);
         flaky.siteKeyFor("digitall.example.com");
         now.addAndGet(JahiaSiteResolver.ROUTING_CACHE_TTL_MS + 1);
         assertThatThrownBy(() -> flaky.siteKeyFor("digitall.example.com")).isInstanceOf(NullPointerException.class);

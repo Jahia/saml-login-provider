@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -65,9 +66,12 @@ public class JahiaSiteResolver implements SiteResolver {
         private final long readAt;
         private final Map<String, Set<String>> sitesByHost;
         private final Set<String> sitesWithModule;
+        /** False when the sites could not be read: then no host is known to be unclaimed. */
+        private final boolean complete;
 
-        private Snapshot(long readAt, Map<String, SiteInfo> sites) {
+        private Snapshot(long readAt, Map<String, SiteInfo> sites, boolean complete) {
             this.readAt = readAt;
+            this.complete = complete;
             this.sitesByHost = indexByHost(sites);
             Set<String> withModule = new HashSet<>();
             sites.forEach((siteKey, info) -> {
@@ -106,6 +110,15 @@ public class JahiaSiteResolver implements SiteResolver {
     }
 
     @Override
+    public boolean isUnclaimed(String serverName) {
+        if (serverName == null) {
+            return false;
+        }
+        Snapshot index = routingIndex();
+        return index.complete && !index.sitesByHost.containsKey(lower(serverName));
+    }
+
+    @Override
     public boolean isModuleEnabled(String siteKey) {
         return siteKey != null && routingIndex().sitesWithModule.contains(siteKey);
     }
@@ -115,7 +128,10 @@ public class JahiaSiteResolver implements SiteResolver {
         if (serverName == null) {
             return Set.of();
         }
-        return indexByHost(safeRead()).getOrDefault(lower(serverName), Set.of());
+        // Fails closed: "no site declares it" lets systemsite list the host, so it must be a real answer
+        Map<String, SiteInfo> sites = tryRead()
+                .orElseThrow(() -> new IllegalStateException("Could not read the sites to validate a host"));
+        return indexByHost(sites).getOrDefault(lower(serverName), Set.of());
     }
 
     @Override
@@ -135,7 +151,7 @@ public class JahiaSiteResolver implements SiteResolver {
             return current;
         }
         try {
-            Snapshot fresh = new Snapshot(now, safeRead());
+            Snapshot fresh = snapshotAt(now);
             routingIndex.set(fresh);
             return fresh;
         } finally {
@@ -148,20 +164,30 @@ public class JahiaSiteResolver implements SiteResolver {
         synchronized (firstBuildLock) {
             Snapshot current = routingIndex.get();
             if (current == null) {
-                current = new Snapshot(now, safeRead());
+                current = snapshotAt(now);
                 routingIndex.set(current);
             }
             return current;
         }
     }
 
+    private Snapshot snapshotAt(long now) {
+        Optional<Map<String, SiteInfo>> read = tryRead();
+        return new Snapshot(now, read.orElse(Map.of()), read.isPresent());
+    }
+
     /** A read failure means "no site": the caller then leaves the login flow alone. */
     private Map<String, SiteInfo> safeRead() {
+        return tryRead().orElse(Map.of());
+    }
+
+    /** The sites, or empty when they could not be read. */
+    private Optional<Map<String, SiteInfo>> tryRead() {
         try {
-            return siteInfos.get();
+            return Optional.of(siteInfos.get());
         } catch (RuntimeException e) {
             LOGGER.warn("Could not read the sites; treating every host as unresolved", e);
-            return Map.of();
+            return Optional.empty();
         }
     }
 

@@ -27,8 +27,8 @@ As a reminder, the purpose of the `env.run.sh` script is to provision the enviro
 ```bash
 # Fetch the necessary javascript dependencies
 > yarn
-# Run the docker environment, but without the tests
-> ./ci.startup.sh notests
+# Run the docker environment (ci.startup.sh takes no arguments: it also runs the specs once)
+> ./ci.startup.sh
 # Provision the environment and run the tests in headless once
 > ./env.run.sh
 # For bash
@@ -47,6 +47,16 @@ Do *NOT* forget to load your environment variables using `source set-env.sh` pri
 `assets/provisioning.yml`. It browses at `digitall.jahia.test` and `idp.jahia.test`, network aliases
 that only resolve **inside** the compose network — so it cannot run from a local node; the other
 specs can.
+
+### Spec 04: hosts no site declares fall back to systemsite
+
+`04-systemsiteFallback.cy.ts` browses at `edit.jahia.test`, a network alias that no site declares,
+standing for a production editing host. It enables the SAML modules and this one on systemsite,
+gives systemsite a connector on that host (callback `/home.callback.saml?siteKey=systemsite`, the
+`jahia-systemsite` client of the realm file), checks the choice page and its Google form name
+systemsite, then logs in through that connector. Its `after()` disables the module on systemsite
+again, so the other specs' "no site, stock login" baseline holds. Like spec 03, it only runs inside
+the compose network.
 
 To iterate on specs without rebuilding the image, once `ci.startup.sh` has provisioned the stack,
 mount your working copy of `cypress/` into a one-off cypress container:

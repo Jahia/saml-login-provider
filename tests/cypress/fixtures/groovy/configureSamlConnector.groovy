@@ -27,6 +27,10 @@
  *   @@IDP_METADATA_URL@@  where JAHIA fetches the IdP metadata -- a container-network address,
  *                         which need not be the address the browser uses
  *   @@POST_LOGIN_PATH@@   where the valve sends the user after a successful callback
+ *   @@INCOMING_TARGET_URL@@  the callback path, appended to @@SP_BASE_URL@@ to make the ACS URL.
+ *                         Plain /home.callback.saml when the host is one of the site's names (the
+ *                         valve then finds the site from the host); a host that NO site declares
+ *                         must name it, e.g. /home.callback.saml?siteKey=systemsite
  */
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -36,6 +40,7 @@ def spEntityId = '@@SP_ENTITY_ID@@'
 def spBaseUrl = '@@SP_BASE_URL@@'
 def idpMetadataUrl = '@@IDP_METADATA_URL@@'
 def postLoginPath = '@@POST_LOGIN_PATH@@'
+def incomingTargetUrl = '@@INCOMING_TARGET_URL@@'
 
 final int METADATA_CONNECT_TIMEOUT_MS = 5000
 final int METADATA_READ_TIMEOUT_MS = 10000
@@ -45,6 +50,11 @@ final int KEYTOOL_TIMEOUT_MS = 60000
 // plain path segment.
 if (!(siteKey ==~ /[A-Za-z0-9][A-Za-z0-9_-]*/)) {
     throw new IllegalArgumentException("Refusing unsafe site key: ${siteKey}")
+}
+// SAML2Filter matches *.saml and dispatches on the suffix (connect/callback/metadata), so the path
+// part must end in callback.saml; only a siteKey query parameter may follow.
+if (!(incomingTargetUrl ==~ /\/([A-Za-z0-9_-]+\.)*callback\.saml(\?siteKey=[A-Za-z0-9][A-Za-z0-9_-]*)?/)) {
+    throw new IllegalArgumentException("Refusing incoming target URL: ${incomingTargetUrl}")
 }
 
 def etcDir = new File(System.getProperty('karaf.etc') ?: '/var/jahia/karaf/etc')
@@ -83,6 +93,7 @@ if (target.exists()) {
             current.getProperty('Saml.relyingPartyIdentifier') == spEntityId &&
             current.getProperty('Saml.serverLocation') == spBaseUrl &&
             current.getProperty('Saml.postLoginPath') == postLoginPath &&
+            current.getProperty('Saml.incomingTargetUrl') == incomingTargetUrl &&
             current.getProperty('Saml.identityProviderMetadata') == metadataB64 &&
             current.getProperty('Saml.mappers.jcrOAuthProvider.mapping') == mappingJson &&
             current.getProperty('Saml.keyStore') != null
@@ -114,14 +125,12 @@ if (isUnchanged) {
 
         // ---------------------------------------------------------- the .cfg
         // Factory PID org.jahia.modules.auth, one instance per site, keyed by siteKey.
-        // incomingTargetUrl must end in callback.saml: SAML2Filter matches *.saml and dispatches on
-        // the suffix (connect/callback/metadata).
         def cfg = """\
 siteKey = ${siteKey}
 Saml.enabled = true
 Saml.relyingPartyIdentifier = ${spEntityId}
 Saml.serverLocation = ${spBaseUrl}
-Saml.incomingTargetUrl = /home.callback.saml
+Saml.incomingTargetUrl = ${incomingTargetUrl}
 Saml.postLoginPath = ${postLoginPath}
 Saml.identityProviderMetadata = ${metadataB64}
 Saml.keyStore = ${keystoreB64}
@@ -146,7 +155,7 @@ Saml.mappers.jcrOAuthProvider.mapping = ${mappingCfg}
         tmp.setText(cfg, 'UTF-8')
         Files.move(tmp.toPath(), target.toPath(),
                 StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-        out << "wrote ${target} (SP ${spBaseUrl}/home.callback.saml)\n"
+        out << "wrote ${target} (ACS ${spBaseUrl}${incomingTargetUrl})\n"
     } finally {
         workDir.deleteDir()
     }

@@ -4,6 +4,7 @@ import org.jahia.bin.filters.AbstractServletFilter;
 import org.jahia.utils.i18n.ResourceBundles;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Reference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,6 +58,17 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
      * the write-in-{@code activate} / read-in-request-threads handoff explicit.
      */
     private volatile String template;
+
+    /**
+     * Static mandatory reference: DS binds it before {@link #activate()}, which publishes it safely to
+     * request threads. {@code null} only in tests that do not set it -- then no site is named.
+     */
+    private SiteResolver siteResolver;
+
+    @Reference
+    public void setSiteResolver(SiteResolver siteResolver) {
+        this.siteResolver = siteResolver;
+    }
 
     @Activate
     public void activate() throws IOException {
@@ -123,6 +135,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         tokens.put("__SITE_FIELD__", siteField(request.getParameter("site")));
         tokens.put("__REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM, redirect));
         tokens.put("__GOOGLE_REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM, redirect));
+        tokens.put("__GOOGLE_SITE_FIELD__", googleSiteField(request));
         tokens.put("__FAILURE_REDIRECT_FIELD__", hiddenField("failureRedirect", failureRedirect(contextPath, redirect)));
         tokens.put("__LABEL_TITLE__", loginError == null
                 ? loginLabel
@@ -219,6 +232,24 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
             return "";
         }
         return hiddenField("site", site);
+    }
+
+    /**
+     * The valve resolves the site from the host, which fails for a host no site declares: such a host
+     * is governed by systemsite (see {@link LoginSite}), so the Google form names it explicitly.
+     */
+    private String googleSiteField(HttpServletRequest request) {
+        String serverName = request.getServerName();
+        if (siteResolver == null || serverName == null) {
+            return "";
+        }
+        try {
+            LoginSite site = LoginSite.of(siteResolver, serverName.toLowerCase(Locale.ROOT));
+            return site != null && site.isFallback() ? hiddenField("siteKey", site.siteKey()) : "";
+        } catch (RuntimeException e) {
+            LOGGER.warn("Could not resolve the login site of host {}; letting the valve resolve it", serverName, e);
+            return "";
+        }
     }
 
     private static String hiddenField(String name, String value) {

@@ -125,6 +125,74 @@ class SamlLoginProviderMutationTest {
     }
 
     @Test
+    void update_systemsite_mayListAHostThatNoSiteDeclares() throws IOException {
+        // Arrange: such a host falls back to systemsite for its login, so systemsite's list governs it
+        when(resolver.serverNamesOf("systemsite")).thenReturn(Set.of("localhost"));
+        when(resolver.sitesClaiming("edit.example.com")).thenReturn(Set.of());
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
+
+            // Act
+            GqlSamlLoginProviderConfig result = mutation.update("systemsite", "edit.example.com");
+
+            // Assert
+            verify(store).save("systemsite", List.of("edit.example.com"));
+            assertThat(result.getFqdn()).isEqualTo("edit.example.com");
+        }
+    }
+
+    @Test
+    void update_systemsite_whenTheSitesCannotBeRead_storesNothing() throws IOException {
+        // Arrange: "no site declares it" cannot be established, so the host must not be accepted
+        when(resolver.serverNamesOf("systemsite")).thenReturn(Set.of());
+        when(resolver.sitesClaiming("digitall.example.com")).thenThrow(new IllegalStateException("read failed"));
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+
+            // Act / Assert
+            assertThatThrownBy(() -> mutation.update("systemsite", "digitall.example.com"))
+                    .isInstanceOf(IllegalStateException.class);
+            verify(store, never()).save(anyString(), anyList());
+        }
+    }
+
+    @Test
+    void update_otherSite_mayNotListAHostThatNoSiteDeclares() throws IOException {
+        // Arrange: only systemsite governs hosts of no site
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+
+            // Act / Assert
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "edit.example.com"))
+                    .isInstanceOf(IllegalArgumentException.class);
+            verify(store, never()).save(anyString(), anyList());
+        }
+    }
+
+    @Test
+    void update_systemsite_mayNotListAHostOfAnotherSite() throws IOException {
+        // Arrange
+        when(resolver.serverNamesOf("systemsite")).thenReturn(Set.of("localhost"));
+        when(resolver.sitesClaiming("digitall.example.com")).thenReturn(Set.of(SITE_KEY));
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+
+            // Act / Assert: the error never names the other site
+            assertThatThrownBy(() -> mutation.update("systemsite", "digitall.example.com"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .satisfies(e -> assertThat(e.getMessage()).doesNotContain(SITE_KEY));
+            verify(store, never()).save(anyString(), anyList());
+        }
+    }
+
+    @Test
     void update_hostSharedWithAnotherSite_isRejectedAndNothingIsStored() throws IOException {
         // Arrange: "localhost" is one of the site's names, but another site declares it too, so
         // Jahia may serve it from either: no single site's list can be allowed to govern it.

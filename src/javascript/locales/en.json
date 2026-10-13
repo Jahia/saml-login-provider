@@ -16,6 +16,7 @@
       "hint": "When the list is empty, nobody is sent to SAML automatically: every visitor gets the login page offering SAML."
     },
     "scope": "This setting applies to the site {{siteKey}} only. Each site has its own list.",
+    "scopeSystemsite": "It also governs every host that no site declares (for example the editing host): list such a host here to send it straight to SAML.",
     "cancel": "Changes discarded.",
     "success": {
       "update": "SAML auto-login configuration saved successfully."
