@@ -26,6 +26,7 @@ public class SamlLoginProviderQuery {
         SamlLoginProviderPermissions.checkSiteAdmin(siteKey);
         List<String> hosts = SamlLoginProviderServices.siteHostsStore().hosts(siteKey);
         return new GqlSamlLoginProviderConfig(siteKey, HostList.canonical(hosts),
-                SamlLoginProviderMutation.sorted(SamlLoginProviderServices.siteResolver().serverNamesOf(siteKey)));
+                SamlLoginProviderMutation.sorted(SamlLoginProviderServices.siteResolver().serverNamesOf(siteKey)),
+                SamlLoginProviderServices.samlSetup().isConfigured(siteKey));
     }
 }

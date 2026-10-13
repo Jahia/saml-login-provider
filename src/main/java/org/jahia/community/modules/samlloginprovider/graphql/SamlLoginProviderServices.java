@@ -1,5 +1,6 @@
 package org.jahia.community.modules.samlloginprovider.graphql;
 
+import org.jahia.community.modules.samlloginprovider.SamlSetup;
 import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
 import org.jahia.community.modules.samlloginprovider.SiteResolver;
 import org.jahia.osgi.BundleUtils;
@@ -20,6 +21,10 @@ final class SamlLoginProviderServices {
 
     static SiteResolver siteResolver() {
         return require(BundleUtils.getOsgiService(SiteResolver.class, null), SiteResolver.class);
+    }
+
+    static SamlSetup samlSetup() {
+        return require(BundleUtils.getOsgiService(SamlSetup.class, null), SamlSetup.class);
     }
 
     private static <T> T require(T service, Class<T> type) {

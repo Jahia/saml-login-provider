@@ -7,6 +7,8 @@ export default () => {
         icon: window.jahia.moonstone.toIconComponent('Lock'),
         targets: ['administration-sites:998'],
         requiredPermission: 'siteAdminSamlLoginProvider',
+        // The module only acts on sites where it is enabled, so its settings only show there.
+        requireModuleInstalledOnSite: 'saml-login-provider',
         label: 'saml-login-provider:label.menu_entry',
         isSelectable: true,
         // Site routes are mounted at /administration/:site/<route key>, and react-router's props are

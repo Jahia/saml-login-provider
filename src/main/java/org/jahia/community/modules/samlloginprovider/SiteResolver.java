@@ -13,6 +13,9 @@ public interface SiteResolver {
      */
     String siteKeyFor(String serverName);
 
+    /** True when saml-login-provider is enabled on the site (directly or as a dependency). */
+    boolean isModuleEnabled(String siteKey);
+
     /** Every site declaring this server name; empty when none does. Always read fresh. */
     Set<String> sitesClaiming(String serverName);
 

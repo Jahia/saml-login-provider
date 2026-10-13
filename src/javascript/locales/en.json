@@ -2,18 +2,18 @@
   "label": {
     "menu_entry": "SAML auto-login",
     "fqdn": "Hosts (comma-separated FQDNs)",
-    "fqdn_hint": "This site's hosts: {{serverNames}}. List those that should go straight to SAML login, or leave empty to turn it off for this site.",
+    "fqdn_hint": "This site's hosts: {{serverNames}}. List those that should go straight to SAML login.",
     "update": "Save",
     "cancel": "Cancel",
     "saving": "Saving…",
     "loading": "Loading…",
     "retry": "Retry",
-    "fqdn_hint_no_server_names": "Leave empty to turn the automatic SAML login off for this site."
+    "fqdn_hint_no_server_names": "List the hosts that should go straight to SAML login."
   },
   "samlLoginProvider": {
-    "description": "On the hosts of this site listed below, unauthenticated visitors are redirected to the SAML connect endpoint (/home.connect.saml) instead of the Jahia login page, and the logout button lands on a public page. On this site's other hosts, they get a login page offering both the credentials form and SAML sign-in.",
+    "description": "On this site, unauthenticated visitors get a login page offering both the credentials form and SAML sign-in. Visitors arriving on the hosts listed below skip it and go straight to the SAML connect endpoint (/home.connect.saml); the logout button then lands on a public page.",
     "disabled": {
-      "hint": "When the list is empty the module is inactive on this site: the standard Jahia login page is used."
+      "hint": "When the list is empty, nobody is sent to SAML automatically: every visitor gets the login page offering SAML."
     },
     "scope": "This setting applies to the site {{siteKey}} only. Each site has its own list.",
     "cancel": "Changes discarded.",
@@ -34,6 +34,7 @@
         "invalid": "Enter a comma-separated list of valid hostnames (e.g. editpp.jahia.com), or leave the field empty.",
         "notSiteHost": "Each host must be one of this site's hosts: {{serverNames}}."
       }
-    }
+    },
+    "samlMissing": "No SAML connector is set up for {{siteKey}}: its visitors keep the standard Jahia login until one is (Authentication settings of the site)."
   }
 }

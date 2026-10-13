@@ -13,11 +13,13 @@ public class GqlSamlLoginProviderConfig {
     private final String siteKey;
     private final String fqdn;
     private final List<String> serverNames;
+    private final boolean samlConfigured;
 
-    public GqlSamlLoginProviderConfig(String siteKey, String fqdn, List<String> serverNames) {
+    public GqlSamlLoginProviderConfig(String siteKey, String fqdn, List<String> serverNames, boolean samlConfigured) {
         this.siteKey = siteKey;
         this.fqdn = fqdn;
         this.serverNames = List.copyOf(serverNames);
+        this.samlConfigured = samlConfigured;
     }
 
     @GraphQLField
@@ -29,7 +31,8 @@ public class GqlSamlLoginProviderConfig {
 
     @GraphQLField
     @GraphQLName("fqdn")
-    @GraphQLDescription("Comma-separated hosts of this site sent straight to SAML login; empty = not configured")
+    @GraphQLDescription("Comma-separated hosts of this site sent straight to SAML login; empty = none (the site's "
+            + "other hosts get the login page offering SAML)")
     public String getFqdn() {
         return fqdn;
     }
@@ -39,5 +42,13 @@ public class GqlSamlLoginProviderConfig {
     @GraphQLDescription("The hosts this site answers on (server name and aliases): the only values fqdn may contain")
     public List<String> getServerNames() {
         return serverNames;
+    }
+
+    @GraphQLField
+    @GraphQLName("samlConfigured")
+    @GraphQLDescription("Whether the site has an enabled SAML connector. Without one the site keeps the standard login, "
+            + "whatever its host list says")
+    public boolean isSamlConfigured() {
+        return samlConfigured;
     }
 }

@@ -1,5 +1,6 @@
 package org.jahia.community.modules.samlloginprovider;
 
+import org.jahia.community.modules.samlloginprovider.JahiaSiteResolver.SiteInfo;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -12,11 +13,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class JahiaSiteResolverTest {
 
-    private final AtomicReference<Map<String, Set<String>>> sites = new AtomicReference<>(Map.of(
-            "digitall", Set.of("digitall.example.com", "www.digitall.example.com"),
-            "other", Set.of("other.example.com"),
-            "systemsite", Set.of("localhost"),
-            "uisite", Set.of("localhost")));
+    private static final Set<String> WITH_MODULE = Set.of("default", JahiaSiteResolver.MODULE_ID);
+    private static final Set<String> WITHOUT_MODULE = Set.of("default");
+
+    private final AtomicReference<Map<String, SiteInfo>> sites = new AtomicReference<>(Map.of(
+            "digitall", new SiteInfo(Set.of("digitall.example.com", "www.digitall.example.com"), WITH_MODULE),
+            "other", new SiteInfo(Set.of("other.example.com"), WITHOUT_MODULE),
+            "systemsite", new SiteInfo(Set.of("localhost"), WITH_MODULE),
+            "uisite", new SiteInfo(Set.of("localhost"), WITHOUT_MODULE)));
     private final AtomicInteger reads = new AtomicInteger();
     private final AtomicLong now = new AtomicLong(1_000);
 
@@ -49,6 +53,14 @@ class JahiaSiteResolverTest {
     }
 
     @Test
+    void isModuleEnabled_followsTheSiteInstalledModules() {
+        assertThat(resolver.isModuleEnabled("digitall")).isTrue();
+        assertThat(resolver.isModuleEnabled("other")).isFalse();
+        assertThat(resolver.isModuleEnabled("missing")).isFalse();
+        assertThat(resolver.isModuleEnabled(null)).isFalse();
+    }
+
+    @Test
     void sitesClaiming_returnsEveryClaimant() {
         assertThat(resolver.sitesClaiming("localhost")).containsExactlyInAnyOrder("systemsite", "uisite");
         assertThat(resolver.sitesClaiming("other.example.com")).containsExactly("other");
@@ -62,12 +74,12 @@ class JahiaSiteResolverTest {
     }
 
     @Test
-    void siteKeyFor_cachesTheIndexBriefly_thenRereadsIt() {
+    void routingLookups_cacheTheIndexBriefly_thenRereadIt() {
         // Arrange
         resolver.siteKeyFor("digitall.example.com");
-        resolver.siteKeyFor("other.example.com");
+        resolver.isModuleEnabled("digitall");
         assertThat(reads).hasValue(1);
-        sites.set(Map.of("digitall", Set.of("renamed.example.com")));
+        sites.set(Map.of("digitall", new SiteInfo(Set.of("renamed.example.com"), WITHOUT_MODULE)));
 
         // Act: past the TTL the routing index is rebuilt
         now.addAndGet(JahiaSiteResolver.ROUTING_CACHE_TTL_MS + 1);
@@ -75,6 +87,7 @@ class JahiaSiteResolverTest {
         // Assert
         assertThat(resolver.siteKeyFor("renamed.example.com")).isEqualTo("digitall");
         assertThat(resolver.siteKeyFor("digitall.example.com")).isNull();
+        assertThat(resolver.isModuleEnabled("digitall")).isFalse();
         assertThat(reads).hasValue(2);
     }
 
@@ -82,7 +95,7 @@ class JahiaSiteResolverTest {
     void sitesClaimingAndServerNamesOf_alwaysReadFreshData() {
         // Arrange: the routing index is warm
         resolver.siteKeyFor("digitall.example.com");
-        sites.set(Map.of("digitall", Set.of("renamed.example.com")));
+        sites.set(Map.of("digitall", new SiteInfo(Set.of("renamed.example.com"), WITH_MODULE)));
 
         // Act / Assert: validation must never act on a stale view
         assertThat(resolver.serverNamesOf("digitall")).containsExactly("renamed.example.com");
@@ -96,6 +109,7 @@ class JahiaSiteResolverTest {
         }, now::get);
 
         assertThat(failing.siteKeyFor("digitall.example.com")).isNull();
+        assertThat(failing.isModuleEnabled("digitall")).isFalse();
         assertThat(failing.sitesClaiming("digitall.example.com")).isEmpty();
         assertThat(failing.serverNamesOf("digitall")).isEmpty();
     }

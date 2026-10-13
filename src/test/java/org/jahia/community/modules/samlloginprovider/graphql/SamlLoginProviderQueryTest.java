@@ -1,5 +1,6 @@
 package org.jahia.community.modules.samlloginprovider.graphql;
 
+import org.jahia.community.modules.samlloginprovider.SamlSetup;
 import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
 import org.jahia.community.modules.samlloginprovider.SiteResolver;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,7 @@ class SamlLoginProviderQueryTest {
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
             GqlSamlLoginProviderConfig result = query.getConfig(SITE_KEY);
@@ -62,6 +64,7 @@ class SamlLoginProviderQueryTest {
             assertThat(result.getSiteKey()).isEqualTo(SITE_KEY);
             assertThat(result.getFqdn()).isEqualTo("digitall.example.com");
             assertThat(result.getServerNames()).containsExactly("digitall.example.com", "www.digitall.example.com");
+            assertThat(result.isSamlConfigured()).isTrue();
         }
     }
 
@@ -74,9 +77,14 @@ class SamlLoginProviderQueryTest {
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> false);
 
-            // Act / Assert
-            assertThat(query.getConfig(SITE_KEY).getFqdn()).isEmpty();
+            // Act
+            GqlSamlLoginProviderConfig result = query.getConfig(SITE_KEY);
+
+            // Assert: no list, and the screen can tell the admin SAML is not set up yet
+            assertThat(result.getFqdn()).isEmpty();
+            assertThat(result.isSamlConfigured()).isFalse();
         }
     }
 }

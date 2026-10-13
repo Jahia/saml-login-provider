@@ -70,11 +70,9 @@ KC_URL=http://localhost:8180
 #   SITE_KEY=SITE_HOST   the content site: given its own server name (above), and the host that goes
 #                        into that site's saml-login-provider host list, i.e. redirected to SAML
 #                        outright.
-#   systemsite=localhost systemsite keeps its stock server name and gets NO host list: the list is
-#                        per site, so an unconfigured systemsite keeps Jahia's stock login on
-#                        localhost. The connector is there so that SAML works on localhost the moment
-#                        systemsite is given a list (Administration -> systemsite -> SAML auto-login),
-#                        and for /home.connect.saml requested directly.
+#   systemsite=localhost systemsite keeps its stock server name and gets NO host list. With the
+#                        module enabled and this connector set up, localhost shows the modified
+#                        login page (/saml-login): credentials form plus "Sign in with Google".
 #
 # The SP entity ID is jahia-<siteKey>; realm/jahia-saml-realm.json declares one client per site.
 SYSTEMSITE_HOST=localhost
@@ -186,13 +184,13 @@ done
 # jmix:authConnectorSettingView views (saml2nt:samlAuthView, joant:jcrOAuthView) where the
 # connector and its mapper are wired. Without this step that screen is simply absent.
 #
-# saml-login-provider itself is deliberately NOT enabled here: it is a server-level module whose
-# admin route lives under Server settings and whose permission is checked on the JCR root node.
+# saml-login-provider is enabled too: it only acts on sites where it is enabled AND that have a SAML
+# connector, and its settings screen only shows on those sites.
 ENABLE_OPS=()
 for entry in "${SAML_SITES[@]}"; do
     site=${entry%%=*}
-    log "Enabling the authentication modules on site $site"
-    for module in jahia-authentication jcr-auth-provider saml-authentication-valve; do
+    log "Enabling the authentication modules and saml-login-provider on site $site"
+    for module in jahia-authentication jcr-auth-provider saml-authentication-valve saml-login-provider; do
         ENABLE_OPS+=("{\"enable\":\"$module\",\"site\":\"$site\"}")
     done
 done
@@ -344,11 +342,12 @@ for entry in "${SAML_SITES[@]}"; do
 done
 cat <<EOF
    Host list        site $SITE_KEY: $SITE_HOST  ($JAHIA_LOCAL_URL/jahia/administration/$SITE_KEY/samlLoginProvider)
-                    other sites: none, so their login is untouched
+                    other sites: none, so their visitors get the modified login page
+                    (/saml-login) wherever the module is enabled and SAML is set up
 
    Try it, each in a private window, as $SAML_TEST_USER:
      $(site_url "$SITE_HOST")/start   -> straight to Keycloak, back logged in ($SITE_HOST is in the list)
-     $(site_url "$SYSTEMSITE_HOST")/start   -> stock Jahia login (systemsite has no host list)
+     $(site_url "$SYSTEMSITE_HOST")/start   -> /saml-login; "Sign in with Google" -> Keycloak -> back
 
 == If you lock yourself out (host configured but SAML broken):
 

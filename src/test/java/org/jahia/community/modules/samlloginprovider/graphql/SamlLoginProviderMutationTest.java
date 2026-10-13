@@ -1,5 +1,6 @@
 package org.jahia.community.modules.samlloginprovider.graphql;
 
+import org.jahia.community.modules.samlloginprovider.SamlSetup;
 import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
 import org.jahia.community.modules.samlloginprovider.SiteResolver;
 import org.junit.jupiter.api.Test;
@@ -91,6 +92,7 @@ class SamlLoginProviderMutationTest {
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
             services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
             GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, " Digitall.EXAMPLE.com , www.digitall.example.com ");
@@ -111,6 +113,7 @@ class SamlLoginProviderMutationTest {
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
             services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
             GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, null);
@@ -150,6 +153,7 @@ class SamlLoginProviderMutationTest {
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
             services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act / Assert
             assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com"))

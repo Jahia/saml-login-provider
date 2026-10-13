@@ -12,6 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,10 +32,14 @@ class SamlLoginUrlProviderTest {
     @Mock
     private HttpServletRequest request;
 
-    /** host -> siteKey, as JahiaSitesService would resolve it. */
+    /** host -> siteKey, as the site lookup resolves it. */
     private final Map<String, String> siteByHost = new HashMap<>();
     /** siteKey -> configured hosts. */
     private final Map<String, List<String>> hostsBySite = new HashMap<>();
+    /** Sites with saml-login-provider enabled. */
+    private final Set<String> moduleEnabledOn = new HashSet<>();
+    /** Sites with a SAML connector set up. */
+    private final Set<String> samlConfiguredOn = new HashSet<>();
 
     private SamlLoginUrlProvider provider;
 
@@ -44,6 +49,11 @@ class SamlLoginUrlProviderTest {
             @Override
             public String siteKeyFor(String serverName) {
                 return siteByHost.get(serverName);
+            }
+
+            @Override
+            public boolean isModuleEnabled(String siteKey) {
+                return moduleEnabledOn.contains(siteKey);
             }
 
             @Override
@@ -67,9 +77,12 @@ class SamlLoginUrlProviderTest {
                 throw new UnsupportedOperationException();
             }
         };
-        provider = new SamlLoginUrlProvider(store, resolver);
+        provider = new SamlLoginUrlProvider(store, resolver, samlConfiguredOn::contains);
         siteByHost.put(LISTED_HOST, SITE);
         siteByHost.put(UNLISTED_HOST, SITE);
+        // By default the site qualifies: module enabled and SAML set up
+        moduleEnabledOn.add(SITE);
+        samlConfiguredOn.add(SITE);
     }
 
     @Test
@@ -100,48 +113,74 @@ class SamlLoginUrlProviderTest {
     }
 
     @Test
-    void getLoginUrl_unlistedHostOfAConfiguredSite_returnsChoiceLoginPath() {
+    void getLoginUrl_unlistedHostOfAQualifyingSite_returnsChoiceLoginPath() {
         // Arrange
         hostsBySite.put(SITE, List.of(LISTED_HOST));
         when(request.getServerName()).thenReturn(UNLISTED_HOST);
         when(request.getContextPath()).thenReturn("/ctx");
         stubPlainRequest("/protected/page", null);
 
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert
-        assertThat(loginUrl).startsWith("/ctx/saml-login");
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request)).startsWith("/ctx/saml-login");
     }
 
     @Test
-    void getLoginUrl_siteWithoutConfiguration_returnsNull() {
-        // Arrange: the host resolves to a site, but that site has no host list
+    void getLoginUrl_qualifyingSiteWithoutHostList_returnsChoiceLoginPath() {
+        // Arrange: module enabled + SAML set up, but nobody is sent to SAML automatically
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/protected/page", null);
+
+        // Act / Assert: the modified login page, offering both ways in
+        assertThat(provider.getLoginUrl(request)).startsWith("/saml-login");
+    }
+
+    @Test
+    void getLoginUrl_moduleNotEnabledOnTheSite_returnsNull() {
+        // Arrange: even a listed host -- the module only acts where it is enabled
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        moduleEnabledOn.remove(SITE);
         when(request.getServerName()).thenReturn(LISTED_HOST);
 
-        // Act / Assert: fail-safe -- stock /cms/login on unconfigured sites
+        // Act / Assert: stock /cms/login
         assertThat(provider.getLoginUrl(request)).isNull();
+        assertThat(provider.getLogoutUrl(request)).isNull();
+    }
+
+    @Test
+    void getLoginUrl_noSamlConnectorOnTheSite_returnsNull() {
+        // Arrange: a listed host whose site has no SAML set up would be a dead end (400) -- never send
+        // anyone there, and do not offer a "Sign in with Google" button that cannot work either.
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        samlConfiguredOn.remove(SITE);
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+
+        // Act / Assert: stock /cms/login
+        assertThat(provider.getLoginUrl(request)).isNull();
+        assertThat(provider.getLogoutUrl(request)).isNull();
     }
 
     @Test
     void getLoginUrl_hostResolvingToNoSite_returnsNull() {
-        // Arrange
         hostsBySite.put(SITE, List.of(LISTED_HOST));
         when(request.getServerName()).thenReturn("unknown.example.com");
 
-        // Act / Assert
         assertThat(provider.getLoginUrl(request)).isNull();
     }
 
     @Test
-    void getLoginUrl_hostListedByAnotherSite_doesNotApply() {
-        // Arrange: site "other" lists a host that resolves to SITE, which is unconfigured. This is
-        // the isolation that keeps a site admin's list from affecting any site but their own.
+    void getLoginUrl_hostListedByAnotherSite_followsItsOwnSite() {
+        // Arrange: site "other" lists a host that resolves to SITE. Only SITE's (empty) list counts,
+        // so this is SITE's choice page, never a SAML redirect decided by "other".
         hostsBySite.put("other", List.of(LISTED_HOST));
+        moduleEnabledOn.add("other");
+        samlConfiguredOn.add("other");
         when(request.getServerName()).thenReturn(LISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/protected/page", null);
 
         // Act / Assert
-        assertThat(provider.getLoginUrl(request)).isNull();
+        assertThat(provider.getLoginUrl(request)).startsWith("/saml-login");
     }
 
     @Test
@@ -153,8 +192,8 @@ class SamlLoginUrlProviderTest {
     }
 
     @Test
-    void getLoginUrl_siteResolutionFails_returnsNull() {
-        // Arrange: a resolver failure must degrade to the stock login, never break it
+    void getLoginUrl_anyLookupFailure_returnsNull() {
+        // Arrange: a failure anywhere in the decision must degrade to the stock login
         SamlLoginUrlProvider failing = new SamlLoginUrlProvider(new SiteHostsStore() {
             @Override
             public List<String> hosts(String siteKey) {
@@ -168,7 +207,12 @@ class SamlLoginUrlProviderTest {
         }, new SiteResolver() {
             @Override
             public String siteKeyFor(String serverName) {
-                throw new IllegalStateException("site service unavailable");
+                return SITE;
+            }
+
+            @Override
+            public boolean isModuleEnabled(String siteKey) {
+                return true;
             }
 
             @Override
@@ -180,6 +224,8 @@ class SamlLoginUrlProviderTest {
             public Set<String> serverNamesOf(String siteKey) {
                 return Set.of();
             }
+        }, siteKey -> {
+            throw new IllegalStateException("jahia-authentication unavailable");
         });
         when(request.getServerName()).thenReturn(LISTED_HOST);
 
@@ -292,16 +338,9 @@ class SamlLoginUrlProviderTest {
     }
 
     @Test
-    void getLogoutUrl_unlistedHostOfAConfiguredSite_returnsNull() {
+    void getLogoutUrl_unlistedHostOfAQualifyingSite_returnsNull() {
         hostsBySite.put(SITE, List.of(LISTED_HOST));
         when(request.getServerName()).thenReturn(UNLISTED_HOST);
-
-        assertThat(provider.getLogoutUrl(request)).isNull();
-    }
-
-    @Test
-    void getLogoutUrl_siteWithoutConfiguration_returnsNull() {
-        when(request.getServerName()).thenReturn(LISTED_HOST);
 
         assertThat(provider.getLogoutUrl(request)).isNull();
     }

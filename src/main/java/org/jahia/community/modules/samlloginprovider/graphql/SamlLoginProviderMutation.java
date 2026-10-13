@@ -27,7 +27,7 @@ public class SamlLoginProviderMutation {
 
     @GraphQLField
     @GraphQLName("update")
-    @GraphQLDescription("Update a site's automatic SAML login configuration. Empty fqdn turns it off for that site.")
+    @GraphQLDescription("Update a site's automatic SAML login configuration. Empty fqdn: nobody is sent to SAML automatically.")
     public GqlSamlLoginProviderConfig update(
             @GraphQLName("siteKey") @GraphQLNonNull
             @GraphQLDescription("The site to update; requires siteAdminSamlLoginProvider on that site")
@@ -71,7 +71,8 @@ public class SamlLoginProviderMutation {
             LOGGER.error("Error storing the saml-login-provider configuration of site {}", siteKey, e);
             throw new IllegalStateException("Unable to store the SAML login configuration");
         }
-        return new GqlSamlLoginProviderConfig(siteKey, HostList.canonical(hosts), sorted(serverNames));
+        return new GqlSamlLoginProviderConfig(siteKey, HostList.canonical(hosts), sorted(serverNames),
+                SamlLoginProviderServices.samlSetup().isConfigured(siteKey));
     }
 
     static List<String> sorted(Collection<String> values) {

@@ -1,16 +1,24 @@
-import { configureDigitallHostNames, DIGITALL, locationOf, requestUntil, setSamlLoginProviderHosts } from '../utils/samlLoginProvider'
+import {
+    DIGITALL,
+    locationOf,
+    requestUntil,
+    setSamlLoginProviderEnabled,
+    setSamlLoginProviderHosts,
+    setUpDigitallForSaml,
+} from '../utils/samlLoginProvider'
 
 describe('SAML Login redirect behavior', () => {
-    // The host list is per site and a request is routed by the site its host resolves to.
-    // digitall answers on DIGITALL.host and DIGITALL.alias (network aliases of the jahia service);
-    // the baseUrl host "jahia" resolves to no site at all.
+    // A request is routed by the site its host resolves to, and the module only acts on a site where
+    // it is enabled and that has a SAML connector. digitall gets both, and answers on DIGITALL.host
+    // and DIGITALL.alias (network aliases of the jahia service); the baseUrl host "jahia" resolves
+    // to no site at all.
     const urlOn = (host: string) => `http://${host}:8080`
     const protectedPath = '/jahia/administration'
     const choiceLoginPath = '/saml-login'
     const samlConnectPath = '/home.connect.saml'
 
     before(() => {
-        configureDigitallHostNames()
+        setUpDigitallForSaml()
     })
 
     beforeEach(() => {
@@ -20,7 +28,8 @@ describe('SAML Login redirect behavior', () => {
     })
 
     afterEach(() => {
-        // Leave the site unconfigured for other specs.
+        // Leave the site as other specs expect it: module enabled, no host list.
+        setSamlLoginProviderEnabled(DIGITALL.siteKey, true)
         setSamlLoginProviderHosts(DIGITALL.siteKey, null)
     })
 
@@ -44,6 +53,33 @@ describe('SAML Login redirect behavior', () => {
             ])
             expect(locationOf(response)).to.include(choiceLoginPath)
         })
+    })
+
+    it('shows the modified login page on every host of a site that has SAML set up but no host list', () => {
+        setSamlLoginProviderHosts(DIGITALL.siteKey, null)
+
+        for (const host of [DIGITALL.host, DIGITALL.alias]) {
+            requestUntil({ url: `${urlOn(host)}${protectedPath}` }, (r) => locationOf(r).includes(choiceLoginPath)).then(
+                (response) => {
+                    expect(locationOf(response), `${host}: choice page, not SAML`).to.include(choiceLoginPath)
+                },
+            )
+        }
+    })
+
+    it('leaves the stock login alone on a site where the module is not enabled, even on a listed host', () => {
+        requestUntil({ url: `${urlOn(DIGITALL.host)}${protectedPath}` }, (r) => locationOf(r).includes(samlConnectPath))
+
+        setSamlLoginProviderEnabled(DIGITALL.siteKey, false)
+
+        // The site's module list reaches routing within a few seconds (cached index): poll for it.
+        const stock = (r: Cypress.Response<unknown>) =>
+            !locationOf(r).includes(samlConnectPath) && !locationOf(r).includes(choiceLoginPath)
+        requestUntil({ url: `${urlOn(DIGITALL.host)}${protectedPath}` }, stock, { attempts: 30, intervalMs: 1000 }).then(
+            (response) => {
+                expect(stock(response), `stock login, got ${locationOf(response) || response.status}`).to.be.true
+            },
+        )
     })
 
     it('leaves the stock login alone on a host whose site is not configured', () => {

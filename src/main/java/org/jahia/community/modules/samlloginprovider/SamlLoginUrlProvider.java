@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
-import java.util.List;
 import java.util.Locale;
 
 /**
@@ -42,22 +41,24 @@ import java.util.Locale;
  * parameter, falling back to server-name resolution — no parameter is needed
  * as long as the virtual host (e.g. edit.jahia.com) is declared on the site.
  *
- * <p><strong>Per-site host scoping (fail-safe by default):</strong> each site holds its own list of
- * hosts ({@link SiteHostsStore}, one {@code karaf/etc} file per site, edited from the site's
- * administration). A request is routed by the site its host resolves to -- the same lookup the
- * SAML connect endpoint uses to pick its connector -- and only that site's list is consulted:
+ * <p><strong>Per-site behavior (fail-safe by default):</strong> a request is routed by the site its
+ * host resolves to -- the same lookup the SAML connect endpoint uses to pick its connector. The
+ * module only acts on a site where it is <em>enabled</em> and that has <em>SAML authentication set
+ * up</em> (an enabled saml-authentication-valve connector, see {@link SamlSetup}). On such a site:
  * <ul>
- * <li><em>host in its site's list</em> -- straight redirect to the SAML connect endpoint (no login
- * form at all);</li>
- * <li><em>site configured, host NOT in its list</em> -- redirect to {@value #CHOICE_LOGIN_PATH}
- * (served by {@link SamlLoginPageFilter}): a page identical to the standard login form plus a
- * "Sign in with Google" button, so users choose between local credentials and Google SAML;</li>
- * <li><em>site not configured, or host resolving to no site</em> -- provider inactive: both methods
- * return {@code null} and Jahia serves the stock {@code /cms/login} page and default logout. This
- * protects against lockouts -- an unconfigured site must never have its login flow altered.</li>
+ * <li><em>host in the site's list</em> ({@link SiteHostsStore}) -- straight redirect to the SAML
+ * connect endpoint (no login form at all);</li>
+ * <li><em>any other host of the site, including when the site has no list</em> -- redirect to
+ * {@value #CHOICE_LOGIN_PATH} (served by {@link SamlLoginPageFilter}): the standard login form plus
+ * a "Sign in with Google" button, so users choose between local credentials and SAML.</li>
  * </ul>
- * Because a list only ever applies to requests resolving to its own site, an administrator of one
- * site cannot change how any other site logs its visitors in.
+ * Everywhere else -- module not enabled, no SAML connector, or a host resolving to no single site --
+ * both methods return {@code null} and Jahia serves the stock {@code /cms/login} page and default
+ * logout. Requiring the connector means nobody is ever sent to a SAML endpoint that cannot serve
+ * them, and no Google button is offered that would lead to a 400.
+ *
+ * <p>Only the request's own site is consulted, so an administrator of one site cannot change how
+ * any other site logs its visitors in.
  */
 @Component(immediate = true, service = {LoginUrlProvider.class, LogoutUrlProvider.class})
 public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider {
@@ -81,11 +82,14 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
 
     private final SiteHostsStore siteHostsStore;
     private final SiteResolver siteResolver;
+    private final SamlSetup samlSetup;
 
     @Activate
-    public SamlLoginUrlProvider(@Reference SiteHostsStore siteHostsStore, @Reference SiteResolver siteResolver) {
+    public SamlLoginUrlProvider(@Reference SiteHostsStore siteHostsStore, @Reference SiteResolver siteResolver,
+                                @Reference SamlSetup samlSetup) {
         this.siteHostsStore = siteHostsStore;
         this.siteResolver = siteResolver;
+        this.samlSetup = samlSetup;
     }
 
     @Override
@@ -96,7 +100,7 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
             // blank results and falls back to the standard /cms/login page
             return null;
         }
-        // Listed host: straight SAML redirect. Other host of a configured site: choice page
+        // Listed host: straight SAML redirect. Any other host of the site: choice page
         // (standard credentials form + "Sign in with Google" SAML button).
         String path = route == Route.SAML_CONNECT ? SAML_CONNECT_PATH : CHOICE_LOGIN_PATH;
         String loginUrl = request.getContextPath() + path;
@@ -185,8 +189,8 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     }
 
     /**
-     * Routes by the site the host resolves to, consulting that site's list only. Any failure to
-     * resolve degrades to {@link Route#INACTIVE}: the stock login must keep working whatever happens.
+     * Routes by the site the host resolves to, consulting that site only. Any failure degrades to
+     * {@link Route#INACTIVE}: the stock login must keep working whatever happens.
      */
     private Route route(HttpServletRequest request) {
         String serverName = request.getServerName();
@@ -194,20 +198,15 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
             return Route.INACTIVE;
         }
         String host = serverName.toLowerCase(Locale.ROOT);
-        String siteKey;
         try {
-            siteKey = siteResolver.siteKeyFor(host);
+            String siteKey = siteResolver.siteKeyFor(host);
+            if (siteKey == null || !siteResolver.isModuleEnabled(siteKey) || !samlSetup.isConfigured(siteKey)) {
+                return Route.INACTIVE;
+            }
+            return siteHostsStore.hosts(siteKey).contains(host) ? Route.SAML_CONNECT : Route.CHOICE_PAGE;
         } catch (RuntimeException e) {
-            LOGGER.warn("Could not resolve the site of host {}; leaving its login flow unchanged", host, e);
+            LOGGER.warn("Could not decide the login route of host {}; leaving its login flow unchanged", host, e);
             return Route.INACTIVE;
         }
-        if (siteKey == null) {
-            return Route.INACTIVE;
-        }
-        List<String> siteHosts = siteHostsStore.hosts(siteKey);
-        if (siteHosts.isEmpty()) {
-            return Route.INACTIVE;
-        }
-        return siteHosts.contains(host) ? Route.SAML_CONNECT : Route.CHOICE_PAGE;
     }
 }

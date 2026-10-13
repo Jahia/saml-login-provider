@@ -1,9 +1,10 @@
 import {
-    configureDigitallHostNames,
     DIGITALL,
+    IDP,
     locationOf,
     requestUntil,
     setSamlLoginProviderHosts,
+    setUpDigitallForSaml,
 } from '../utils/samlLoginProvider'
 
 // Full auto-login round trip: an unauthenticated visitor on a configured host is sent by
@@ -22,11 +23,8 @@ describe('SAML auto login', () => {
     // to Jahia is same-site and the session cookie travels with it.
     const siteHost = DIGITALL.host
     const siteUrl = `http://${siteHost}:8080`
-    const idpUrl = 'http://idp.jahia.test:8180'
-    const realm = 'jahia-saml'
-    const idpMetadataUrl = `${idpUrl}/realms/${realm}/protocol/saml/descriptor`
-    // Must match the clientId in saml-idp/realm/jahia-saml-realm.json.
-    const spEntityId = 'jahia-digitall'
+    const idpUrl = IDP.url
+    const realm = IDP.realm
     // The IdP user and the names the realm file gives it.
     const samlUser = 'saml.tester'
     const samlFirstName = 'Saml'
@@ -34,9 +32,6 @@ describe('SAML auto login', () => {
     const samlConnectPath = '/home.connect.saml'
     // Protected: an anonymous request is a 401 that saml-login-provider turns into a redirect.
     const protectedPath = '/start'
-
-    const IDP_STARTUP_POLL = { attempts: 40, intervalMs: 3000 }
-    const CONNECTOR_POLL = { attempts: 30, intervalMs: 1000 }
 
     // A fresh password for the IdP user on every run, so no credential is stored anywhere.
     // crypto.randomUUID() is unavailable here: the spec runs on http://, not a secure context.
@@ -83,30 +78,8 @@ describe('SAML auto login', () => {
     }
 
     before(() => {
-        requestUntil({ url: idpMetadataUrl }, (r) => r.status === 200, IDP_STARTUP_POLL)
-            .its('status')
-            .should('eq', 200)
+        setUpDigitallForSaml()
         resetIdpUserPassword()
-
-        configureDigitallHostNames()
-        cy.executeGroovy('groovy/configureSamlConnector.groovy', {
-            '@@SITE@@': siteKey,
-            '@@SP_ENTITY_ID@@': spEntityId,
-            '@@SP_BASE_URL@@': siteUrl,
-            // Jahia fetches this itself, over the stack network.
-            '@@IDP_METADATA_URL@@': idpMetadataUrl,
-            '@@POST_LOGIN_PATH@@': '/home.html',
-        })
-
-        // Felix FileInstall picks the connector .cfg up asynchronously. Until it has, the valve
-        // answers 400 (no connector for this site); once it has, it serves the HTTP-POST
-        // auto-submit form aimed at the IdP. Only then is it safe to enable the redirect: a
-        // configured host without a working connector locks visitors out.
-        const connectorServes = (r: Cypress.Response<unknown>) =>
-            r.status === 200 && typeof r.body === 'string' && r.body.includes('idp.jahia.test')
-        requestUntil({ url: `${siteUrl}${samlConnectPath}` }, connectorServes, CONNECTOR_POLL).then((r) => {
-            expect(connectorServes(r), `${samlConnectPath} serves the AuthnRequest form`).to.be.true
-        })
 
         setSamlLoginProviderHosts(siteKey, siteHost)
         requestUntil({ url: `${siteUrl}${protectedPath}` }, (r) => locationOf(r).includes(samlConnectPath)).then(

@@ -31,7 +31,7 @@
     </scm>
 
     <properties>
-        <jahia-depends>default,siteSettings,graphql-dxm-provider</jahia-depends>
+        <jahia-depends>default,siteSettings,graphql-dxm-provider,jahia-authentication</jahia-depends>
         <yarn.arguments>build:production</yarn.arguments>
     </properties>
 
@@ -67,6 +67,15 @@
             <groupId>org.jahia.modules</groupId>
             <artifactId>graphql-dxm-provider</artifactId>
             <version>3.4.0</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Whether a site has a SAML connector set up is read from jahia-authentication's
+             SettingsService, the store saml-authentication-valve itself reads connectors from.
+             2.1.0 is the generation the valve 4.x and jcr-auth-provider 4.x wire to. -->
+        <dependency>
+            <groupId>org.jahia.modules</groupId>
+            <artifactId>jahia-authentication</artifactId>
+            <version>2.1.0</version>
             <scope>provided</scope>
         </dependency>
         <!-- Test framework versions are pinned on purpose: neither jahia-modules

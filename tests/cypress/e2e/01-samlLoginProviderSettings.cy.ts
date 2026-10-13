@@ -1,5 +1,5 @@
 import { DocumentNode } from 'graphql'
-import { configureDigitallHostNames, DIGITALL } from '../utils/samlLoginProvider'
+import { configureDigitallHostNames, DIGITALL, setSamlLoginProviderEnabled } from '../utils/samlLoginProvider'
 
 describe('SAML Login Provider Settings', () => {
     // Site-level route: /administration/:site/<route key> (target administration-sites,
@@ -34,8 +34,10 @@ describe('SAML Login Provider Settings', () => {
     }
 
     before(() => {
-        // The list only accepts the site's own names: give digitall two of them.
+        // The list only accepts the site's own names: give digitall two of them. The settings screen
+        // only shows on sites where the module is enabled.
         configureDigitallHostNames()
+        setSamlLoginProviderEnabled(siteKey, true)
     })
 
     beforeEach(() => {

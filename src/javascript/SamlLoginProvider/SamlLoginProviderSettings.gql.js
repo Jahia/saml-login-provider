@@ -7,6 +7,7 @@ export const GET_SAML_LOGIN_PROVIDER_CONFIG = gql`
                 siteKey
                 fqdn
                 serverNames
+                samlConfigured
             }
         }
     }
@@ -19,6 +20,7 @@ export const UPDATE_SAML_LOGIN_PROVIDER_CONFIG = gql`
                 siteKey
                 fqdn
                 serverNames
+                samlConfigured
             }
         }
     }

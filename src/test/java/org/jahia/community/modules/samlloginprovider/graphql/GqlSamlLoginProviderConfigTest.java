@@ -13,19 +13,20 @@ class GqlSamlLoginProviderConfigTest {
     void getters_returnTheValuesPassedToTheConstructor() {
         // Arrange
         GqlSamlLoginProviderConfig config = new GqlSamlLoginProviderConfig(
-                "digitall", "example.com,foo.example.com", List.of("example.com", "foo.example.com"));
+                "digitall", "example.com,foo.example.com", List.of("example.com", "foo.example.com"), true);
 
         // Act / Assert
         assertThat(config.getSiteKey()).isEqualTo("digitall");
         assertThat(config.getFqdn()).isEqualTo("example.com,foo.example.com");
         assertThat(config.getServerNames()).containsExactly("example.com", "foo.example.com");
+        assertThat(config.isSamlConfigured()).isTrue();
     }
 
     @Test
     void serverNames_isADefensiveCopy() {
         // Arrange
         List<String> names = new ArrayList<>(List.of("example.com"));
-        GqlSamlLoginProviderConfig config = new GqlSamlLoginProviderConfig("digitall", "", names);
+        GqlSamlLoginProviderConfig config = new GqlSamlLoginProviderConfig("digitall", "", names, false);
 
         // Act
         names.add("mutated.example.com");

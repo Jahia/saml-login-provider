@@ -25,6 +25,28 @@ const isValidHostList = value => parseHosts(value)
         HOST_PATTERN.test(host) &&
         host.split('.').every(label => label.length <= MAX_LABEL_LENGTH));
 
+// Which site the setting belongs to, and whether that site can use it at all yet.
+const SiteScope = ({siteKey, isSamlConfigured}) => {
+    const {t} = useTranslation('saml-login-provider');
+    return (
+        <>
+            <div className={styles.slp_scope_warning} role="note">
+                <strong>{t('samlLoginProvider.scope', {siteKey})}</strong>
+            </div>
+            {!isSamlConfigured && (
+                <div id="slp-saml-missing" className={`${styles.slp_alert} ${styles['slp_alert--info']}`} role="note">
+                    {t('samlLoginProvider.samlMissing', {siteKey})}
+                </div>
+            )}
+        </>
+    );
+};
+
+SiteScope.propTypes = {
+    siteKey: PropTypes.string.isRequired,
+    isSamlConfigured: PropTypes.bool.isRequired
+};
+
 export const SamlLoginProviderSettings = ({siteKey}) => {
     const {t} = useTranslation('saml-login-provider');
 
@@ -59,6 +81,8 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
 
     // The hosts this site answers on: the only values the server accepts in the list.
     const serverNames = configData?.samlLoginProvider?.config?.serverNames || [];
+    // Without an enabled SAML connector the site keeps the standard login, whatever is saved here.
+    const samlConfigured = configData?.samlLoginProvider?.config?.samlConfigured !== false;
 
     useEffect(() => {
         if (configData && configData.samlLoginProvider) {
@@ -155,9 +179,7 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
                     <p>{t('samlLoginProvider.disabled.hint')}</p>
                 </div>
 
-                <div className={styles.slp_scope_warning} role="note">
-                    <strong>{t('samlLoginProvider.scope', {siteKey})}</strong>
-                </div>
+                <SiteScope siteKey={siteKey} isSamlConfigured={samlConfigured}/>
 
                 {refetchFailed && (
                     <div aria-hidden="true" className={`${styles.slp_alert} ${styles['slp_alert--error']}`}>
