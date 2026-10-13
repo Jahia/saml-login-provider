@@ -73,12 +73,21 @@ yarn install
 ```
 
 - Admin path: `/jahia/administration/samlLoginProvider`
-- Specs cover: reading/saving the host list, validation errors, and the `/saml-login` /
-  `/home.connect.saml` redirect behavior for configured vs. non-configured hosts
+- Specs cover: reading/saving the host list, validation errors, the `/saml-login` /
+  `/home.connect.saml` redirect behavior for configured vs. non-configured hosts, and (spec 03)
+  the full auto-login round trip through a real Keycloak — the `idp` compose service, with the
+  SAML modules provisioned on digitall — ending in a Jahia session with the mapped attributes
+- Spec 03 runs only inside the compose network (`digitall.jahia.test` / `idp.jahia.test` aliases);
+  see `tests/README.md` for iterating on it without rebuilding the image
+- The host list reaches `SamlLoginUrlProvider` asynchronously (ConfigurationAdmin), a fraction of
+  a second after the mutation returns: specs poll for its effect (`cypress/utils/samlLoginProvider.ts`)
+  instead of asserting on the first response
 - Run `mvn clean install` first: `ci.build.sh` copies `../target/*-SNAPSHOT.jar` into the image
 - Results: `docker cp "cypress:/home/jahians/results" .` (from `tests/`; git-ignored)
 - Jahia is published on `127.0.0.1` only (HTTP 8080, JDWP 8000 with JPDA on); Cypress reaches it over the compose network
-- Manual end-to-end login against a real Keycloak SAML IdP (not part of CI): see `tests/saml-idp/README.md`
+- Manual end-to-end login from a browser on your machine (separate Keycloak on `127.0.0.1:8180`,
+  `digitall.localhost`): see `tests/saml-idp/README.md`. It shares the realm file and the Groovy
+  scripts in `tests/cypress/fixtures/groovy/` with spec 03
 
 ## Gotchas
 
