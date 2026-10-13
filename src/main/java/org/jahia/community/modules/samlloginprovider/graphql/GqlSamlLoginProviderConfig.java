@@ -4,20 +4,51 @@ import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 
+import java.util.List;
+
 @GraphQLName("SamlLoginProviderConfig")
-@GraphQLDescription("Configuration of the automatic SAML login redirect")
+@GraphQLDescription("A site's automatic SAML login configuration")
 public class GqlSamlLoginProviderConfig {
 
+    private final String siteKey;
     private final String fqdn;
+    private final List<String> serverNames;
+    private final boolean samlConfigured;
 
-    public GqlSamlLoginProviderConfig(String fqdn) {
+    public GqlSamlLoginProviderConfig(String siteKey, String fqdn, List<String> serverNames, boolean samlConfigured) {
+        this.siteKey = siteKey;
         this.fqdn = fqdn;
+        this.serverNames = List.copyOf(serverNames);
+        this.samlConfigured = samlConfigured;
+    }
+
+    @GraphQLField
+    @GraphQLName("siteKey")
+    @GraphQLDescription("The site this configuration belongs to")
+    public String getSiteKey() {
+        return siteKey;
     }
 
     @GraphQLField
     @GraphQLName("fqdn")
-    @GraphQLDescription("Comma-separated list of hosts the automatic SAML login applies to; empty = disabled")
+    @GraphQLDescription("Comma-separated hosts of this site sent straight to SAML login; empty = none (the site's "
+            + "other hosts get the login page offering SAML)")
     public String getFqdn() {
         return fqdn;
+    }
+
+    @GraphQLField
+    @GraphQLName("serverNames")
+    @GraphQLDescription("The hosts this site answers on (server name and aliases): the only values fqdn may contain")
+    public List<String> getServerNames() {
+        return serverNames;
+    }
+
+    @GraphQLField
+    @GraphQLName("samlConfigured")
+    @GraphQLDescription("Whether the site has an enabled SAML connector. Without one the site keeps the standard login, "
+            + "whatever its host list says")
+    public boolean isSamlConfigured() {
+        return samlConfigured;
     }
 }

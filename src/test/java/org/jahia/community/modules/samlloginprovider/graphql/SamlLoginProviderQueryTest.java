@@ -1,13 +1,16 @@
 package org.jahia.community.modules.samlloginprovider.graphql;
 
-import org.jahia.community.modules.samlloginprovider.ConfigStore;
+import org.jahia.community.modules.samlloginprovider.SamlSetup;
+import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
+import org.jahia.community.modules.samlloginprovider.SiteResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.io.IOException;
+import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -17,81 +20,71 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SamlLoginProviderQueryTest {
 
-    private static final String SITE_KEY = "mySite";
+    private static final String SITE_KEY = "digitall";
 
     @Mock
-    private ConfigStore configStore;
+    private SiteHostsStore store;
+
+    @Mock
+    private SiteResolver resolver;
 
     private final SamlLoginProviderQuery query = new SamlLoginProviderQuery();
 
     @Test
-    void getConfig_permissionDenied_propagatesExceptionAndNeverTouchesConfigStore() {
-        // Arrange / Act / Assert
+    void config_permissionDenied_propagatesExceptionAndNeverTouchesTheServices() {
         try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
-             MockedStatic<ConfigStore> configStoreStatic = mockStatic(ConfigStore.class)) {
-            permissions.when(SamlLoginProviderPermissions::checkServerAdmin)
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            permissions.when(() -> SamlLoginProviderPermissions.checkSiteAdmin(SITE_KEY))
                     .thenThrow(new SecurityException("Access denied"));
-
-            assertThatThrownBy(() -> query.getConfig(SITE_KEY))
-                    .isInstanceOf(SecurityException.class)
-                    .hasMessageContaining("Access denied");
-
-            configStoreStatic.verifyNoInteractions();
-        }
-    }
-
-    @Test
-    void getConfig_ioExceptionFromStore_surfacesAsIllegalStateExceptionWithGenericMessage() throws IOException {
-        // Arrange
-        when(configStore.read()).thenThrow(new IOException("disk failure detail"));
-
-        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
-             MockedStatic<ConfigStore> configStoreStatic = mockStatic(ConfigStore.class)) {
-            configStoreStatic.when(ConfigStore::fromOsgi).thenReturn(configStore);
 
             // Act / Assert
             assertThatThrownBy(() -> query.getConfig(SITE_KEY))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("Unable to read the SAML login configuration")
-                    .satisfies(e -> assertThat(e.getMessage()).doesNotContain("disk failure detail"));
-
-            permissions.verify(SamlLoginProviderPermissions::checkServerAdmin);
+                    .isInstanceOf(SecurityException.class)
+                    .hasMessageContaining("Access denied");
+            services.verifyNoInteractions();
         }
     }
 
     @Test
-    void getConfig_validRead_returnsWrappedConfig() throws IOException {
+    void config_returnsTheSiteHostsAndItsServerNamesSorted() {
         // Arrange
-        when(configStore.read()).thenReturn("example.com,foo.example.com");
-
+        when(store.hosts(SITE_KEY)).thenReturn(List.of("digitall.example.com"));
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("www.digitall.example.com", "digitall.example.com"));
         try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
-             MockedStatic<ConfigStore> configStoreStatic = mockStatic(ConfigStore.class)) {
-            configStoreStatic.when(ConfigStore::fromOsgi).thenReturn(configStore);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
             GqlSamlLoginProviderConfig result = query.getConfig(SITE_KEY);
 
             // Assert
-            assertThat(result.getFqdn()).isEqualTo("example.com,foo.example.com");
-            permissions.verify(SamlLoginProviderPermissions::checkServerAdmin);
+            permissions.verify(() -> SamlLoginProviderPermissions.checkSiteAdmin(SITE_KEY));
+            assertThat(result.getSiteKey()).isEqualTo(SITE_KEY);
+            assertThat(result.getFqdn()).isEqualTo("digitall.example.com");
+            assertThat(result.getServerNames()).containsExactly("digitall.example.com", "www.digitall.example.com");
+            assertThat(result.isSamlConfigured()).isTrue();
         }
     }
 
     @Test
-    void getConfig_nullSiteKey_stillAuthorizesAndReadsConfig() throws IOException {
-        // Arrange: siteKey is caller-context only, so a null value must not change behavior
-        when(configStore.read()).thenReturn("example.com");
-
+    void config_unconfiguredSite_returnsAnEmptyHostList() {
+        // Arrange
+        when(store.hosts(SITE_KEY)).thenReturn(List.of());
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
         try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
-             MockedStatic<ConfigStore> configStoreStatic = mockStatic(ConfigStore.class)) {
-            configStoreStatic.when(ConfigStore::fromOsgi).thenReturn(configStore);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> false);
 
             // Act
-            GqlSamlLoginProviderConfig result = query.getConfig(null);
+            GqlSamlLoginProviderConfig result = query.getConfig(SITE_KEY);
 
-            // Assert
-            assertThat(result.getFqdn()).isEqualTo("example.com");
-            permissions.verify(SamlLoginProviderPermissions::checkServerAdmin);
+            // Assert: no list, and the screen can tell the admin SAML is not set up yet
+            assertThat(result.getFqdn()).isEmpty();
+            assertThat(result.isSamlConfigured()).isFalse();
         }
     }
 }

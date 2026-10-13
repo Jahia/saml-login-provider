@@ -1,4 +1,11 @@
-import { locationOf, requestUntil, setSamlLoginProviderHosts } from '../utils/samlLoginProvider'
+import {
+    DIGITALL,
+    IDP,
+    locationOf,
+    requestUntil,
+    setSamlLoginProviderHosts,
+    setUpDigitallForSaml,
+} from '../utils/samlLoginProvider'
 
 // Full auto-login round trip: an unauthenticated visitor on a configured host is sent by
 // saml-login-provider to /home.connect.saml, the valve hands them to a real Keycloak, and the
@@ -11,16 +18,13 @@ import { locationOf, requestUntil, setSamlLoginProviderHosts } from '../utils/sa
 // reloads the spec at that origin and runs before() a second time. Everything in before() is
 // idempotent, and the reload also re-draws samlPassword, which the second before() then sets.
 describe('SAML auto login', () => {
-    const siteKey = 'digitall'
+    const siteKey = DIGITALL.siteKey
     // Network aliases from docker-compose.yml. Both live under jahia.test, so the IdP's POST back
     // to Jahia is same-site and the session cookie travels with it.
-    const siteHost = 'digitall.jahia.test'
+    const siteHost = DIGITALL.host
     const siteUrl = `http://${siteHost}:8080`
-    const idpUrl = 'http://idp.jahia.test:8180'
-    const realm = 'jahia-saml'
-    const idpMetadataUrl = `${idpUrl}/realms/${realm}/protocol/saml/descriptor`
-    // Must match the clientId in saml-idp/realm/jahia-saml-realm.json.
-    const spEntityId = 'jahia-digitall'
+    const idpUrl = IDP.url
+    const realm = IDP.realm
     // The IdP user and the names the realm file gives it.
     const samlUser = 'saml.tester'
     const samlFirstName = 'Saml'
@@ -28,9 +32,6 @@ describe('SAML auto login', () => {
     const samlConnectPath = '/home.connect.saml'
     // Protected: an anonymous request is a 401 that saml-login-provider turns into a redirect.
     const protectedPath = '/start'
-
-    const IDP_STARTUP_POLL = { attempts: 40, intervalMs: 3000 }
-    const CONNECTOR_POLL = { attempts: 30, intervalMs: 1000 }
 
     // A fresh password for the IdP user on every run, so no credential is stored anywhere.
     // crypto.randomUUID() is unavailable here: the spec runs on http://, not a secure context.
@@ -77,34 +78,10 @@ describe('SAML auto login', () => {
     }
 
     before(() => {
-        requestUntil({ url: idpMetadataUrl }, (r) => r.status === 200, IDP_STARTUP_POLL)
-            .its('status')
-            .should('eq', 200)
+        setUpDigitallForSaml()
         resetIdpUserPassword()
 
-        // Digitall ships with the same j:serverName as systemsite (localhost), so no host resolves
-        // to it until it gets its own -- see the script header.
-        cy.executeGroovy('groovy/configureSiteHost.groovy', { '@@HOST@@': siteHost, '@@SITE@@': siteKey })
-        cy.executeGroovy('groovy/configureSamlConnector.groovy', {
-            '@@SITE@@': siteKey,
-            '@@SP_ENTITY_ID@@': spEntityId,
-            '@@SP_BASE_URL@@': siteUrl,
-            // Jahia fetches this itself, over the stack network.
-            '@@IDP_METADATA_URL@@': idpMetadataUrl,
-            '@@POST_LOGIN_PATH@@': '/home.html',
-        })
-
-        // Felix FileInstall picks the connector .cfg up asynchronously. Until it has, the valve
-        // answers 400 (no connector for this site); once it has, it serves the HTTP-POST
-        // auto-submit form aimed at the IdP. Only then is it safe to enable the redirect: a
-        // configured host without a working connector locks visitors out.
-        const connectorServes = (r: Cypress.Response<unknown>) =>
-            r.status === 200 && typeof r.body === 'string' && r.body.includes('idp.jahia.test')
-        requestUntil({ url: `${siteUrl}${samlConnectPath}` }, connectorServes, CONNECTOR_POLL).then((r) => {
-            expect(connectorServes(r), `${samlConnectPath} serves the AuthnRequest form`).to.be.true
-        })
-
-        setSamlLoginProviderHosts(siteHost)
+        setSamlLoginProviderHosts(siteKey, siteHost)
         requestUntil({ url: `${siteUrl}${protectedPath}` }, (r) => locationOf(r).includes(samlConnectPath)).then(
             (r) => {
                 expect(locationOf(r), 'host list in effect').to.include(samlConnectPath)
@@ -114,11 +91,17 @@ describe('SAML auto login', () => {
 
     after(() => {
         // Server-wide setting: leave the baseline other specs expect.
-        setSamlLoginProviderHosts(null)
+        setSamlLoginProviderHosts(siteKey, null)
     })
 
     it('takes an unauthenticated visitor through the IdP login page and back to the page they asked for', () => {
         cy.clearAllCookies()
+
+        // Where the callback sends the visitor back: the page first asked for, to which Jahia adds
+        // ?site=. Watched as a request rather than read from cy.url()/cy.location(): right after
+        // the AUT comes back from the IdP's origin, Cypress intermittently yields [] for both.
+        const escapedSiteUrl = siteUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        cy.intercept({ method: 'GET', url: new RegExp(`^${escapedSiteUrl}${protectedPath}\\?site=`) }).as('landing')
 
         // The module must send this straight to the SAML connect endpoint, which auto-submits the
         // AuthnRequest to the IdP.
@@ -133,14 +116,18 @@ describe('SAML auto login', () => {
         })
 
         // The IdP POSTs the signed assertion to /home.callback.saml, which returns the visitor to
-        // the URL they first asked for (carried as ?redirect=). Asserted on cy.url(): once cy.origin
-        // has run, cy.location('pathname') yields [] here although the AUT is plainly on the site.
-        //
-        // The SESSION is asserted in the next test, not here. The session cookie is set while the
-        // AUT is coming back from the IdP's origin, and Cypress keeps cookies from such responses
-        // in its own simulated jar rather than the browser's -- after the round trip the browser
-        // holds no cookie at all, although Jahia did open the session.
-        cy.url({ timeout: 30000 }).should('match', new RegExp(`^${siteUrl}${protectedPath}(\\?|$)`))
+        // the URL they first asked for (carried as ?redirect=). Jahia answering that page with 403
+        // -- not with another redirect to the IdP -- means it saw a logged-in visitor, one who
+        // simply is not an editor (/start is the edit-mode entry).
+        cy.wait('@landing', { timeout: 30000 }).then(({ response }) => {
+            expect(response?.statusCode, 'landing page answered to a logged-in non-editor').to.eq(403)
+        })
+
+        // The full SESSION check (who is logged in, with which attributes) is the next test: the
+        // session cookie is set while the AUT is coming back from the IdP's origin, and Cypress
+        // keeps cookies from such responses in its own simulated jar rather than the browser's --
+        // after the round trip the browser holds no cookie to inspect, although Jahia opened the
+        // session (the 403 above was served through that simulated jar).
     })
 
     it('opens a Jahia session for the IdP user, carrying the attributes the connector maps', () => {

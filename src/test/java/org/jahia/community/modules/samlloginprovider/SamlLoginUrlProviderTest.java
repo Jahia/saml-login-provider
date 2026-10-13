@@ -11,9 +11,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,57 +24,72 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SamlLoginUrlProviderTest {
 
+    private static final String SITE = "mysite";
+    private static final String LISTED_HOST = "configured.example.com";
+    /** Another server name of the same site, not in its host list. */
+    private static final String UNLISTED_HOST = "other.example.com";
+
     @Mock
     private HttpServletRequest request;
+
+    /** host -> siteKey, as the site lookup resolves it. */
+    private final Map<String, String> siteByHost = new HashMap<>();
+    /** siteKey -> configured hosts. */
+    private final Map<String, List<String>> hostsBySite = new HashMap<>();
+    /** Sites with saml-login-provider enabled. */
+    private final Set<String> moduleEnabledOn = new HashSet<>();
+    /** Sites with a SAML connector set up. */
+    private final Set<String> samlConfiguredOn = new HashSet<>();
 
     private SamlLoginUrlProvider provider;
 
     @BeforeEach
     void setUp() {
-        provider = new SamlLoginUrlProvider();
+        SiteResolver resolver = new SiteResolver() {
+            @Override
+            public String siteKeyFor(String serverName) {
+                return siteByHost.get(serverName);
+            }
+
+            @Override
+            public boolean isModuleEnabled(String siteKey) {
+                return moduleEnabledOn.contains(siteKey);
+            }
+
+            @Override
+            public Set<String> sitesClaiming(String serverName) {
+                return Set.of();
+            }
+
+            @Override
+            public Set<String> serverNamesOf(String siteKey) {
+                return Set.of();
+            }
+        };
+        SiteHostsStore store = new SiteHostsStore() {
+            @Override
+            public List<String> hosts(String siteKey) {
+                return hostsBySite.getOrDefault(siteKey, List.of());
+            }
+
+            @Override
+            public void save(String siteKey, List<String> hosts) {
+                throw new UnsupportedOperationException();
+            }
+        };
+        provider = new SamlLoginUrlProvider(store, resolver, samlConfiguredOn::contains);
+        siteByHost.put(LISTED_HOST, SITE);
+        siteByHost.put(UNLISTED_HOST, SITE);
+        // By default the site qualifies: module enabled and SAML set up
+        moduleEnabledOn.add(SITE);
+        samlConfiguredOn.add(SITE);
     }
 
     @Test
-    void activate_commaSeparatedFqdn_isParsedLowercasedAndTrimmed() {
+    void getLoginUrl_listedHostOfItsSite_returnsSamlConnectPath() {
         // Arrange
-        activateWithFqdn(" Example.COM , Foo.EXAMPLE.com ");
-        when(request.getServerName()).thenReturn("example.com");
-        when(request.getContextPath()).thenReturn("");
-        stubPlainRequest("/some/page", null);
-
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert: the configured host (lower-cased) matches -> straight SAML redirect
-        assertThat(loginUrl).startsWith("/home.connect.saml");
-    }
-
-    @Test
-    void activate_missingFqdnProperty_resultsInEmptyHostSet() {
-        // Arrange
-        provider.activate(Collections.emptyMap());
-
-        // Act: hosts.isEmpty() short-circuits before any request inspection
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert: fail-safe default -> provider inactive
-        assertThat(loginUrl).isNull();
-    }
-
-    @Test
-    void getLoginUrl_noConfiguration_returnsNull() {
-        // Act: provider never activated -> internal host set defaults to empty
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert
-        assertThat(loginUrl).isNull();
-    }
-
-    @Test
-    void getLoginUrl_hostInList_returnsSamlConnectPath() {
-        // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(LISTED_HOST);
         when(request.getContextPath()).thenReturn("/ctx");
         stubPlainRequest("/protected/page", null);
 
@@ -84,25 +101,144 @@ class SamlLoginUrlProviderTest {
     }
 
     @Test
-    void getLoginUrl_hostNotInList_returnsChoiceLoginPath() {
+    void getLoginUrl_hostIsMatchedCaseInsensitively() {
         // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("other.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn("Configured.EXAMPLE.com");
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/some/page", null);
+
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request)).startsWith("/home.connect.saml");
+    }
+
+    @Test
+    void getLoginUrl_unlistedHostOfAQualifyingSite_returnsChoiceLoginPath() {
+        // Arrange
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
         when(request.getContextPath()).thenReturn("/ctx");
         stubPlainRequest("/protected/page", null);
 
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request)).startsWith("/ctx/saml-login");
+    }
 
-        // Assert
-        assertThat(loginUrl).startsWith("/ctx/saml-login");
+    @Test
+    void getLoginUrl_qualifyingSiteWithoutHostList_returnsChoiceLoginPath() {
+        // Arrange: module enabled + SAML set up, but nobody is sent to SAML automatically
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/protected/page", null);
+
+        // Act / Assert: the modified login page, offering both ways in
+        assertThat(provider.getLoginUrl(request)).startsWith("/saml-login");
+    }
+
+    @Test
+    void getLoginUrl_moduleNotEnabledOnTheSite_returnsNull() {
+        // Arrange: even a listed host -- the module only acts where it is enabled
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        moduleEnabledOn.remove(SITE);
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+
+        // Act / Assert: stock /cms/login
+        assertThat(provider.getLoginUrl(request)).isNull();
+        assertThat(provider.getLogoutUrl(request)).isNull();
+    }
+
+    @Test
+    void getLoginUrl_noSamlConnectorOnTheSite_returnsNull() {
+        // Arrange: a listed host whose site has no SAML set up would be a dead end (400) -- never send
+        // anyone there, and do not offer a "Sign in with Google" button that cannot work either.
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        samlConfiguredOn.remove(SITE);
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+
+        // Act / Assert: stock /cms/login
+        assertThat(provider.getLoginUrl(request)).isNull();
+        assertThat(provider.getLogoutUrl(request)).isNull();
+    }
+
+    @Test
+    void getLoginUrl_hostResolvingToNoSite_returnsNull() {
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn("unknown.example.com");
+
+        assertThat(provider.getLoginUrl(request)).isNull();
+    }
+
+    @Test
+    void getLoginUrl_hostListedByAnotherSite_followsItsOwnSite() {
+        // Arrange: site "other" lists a host that resolves to SITE. Only SITE's (empty) list counts,
+        // so this is SITE's choice page, never a SAML redirect decided by "other".
+        hostsBySite.put("other", List.of(LISTED_HOST));
+        moduleEnabledOn.add("other");
+        samlConfiguredOn.add("other");
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/protected/page", null);
+
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request)).startsWith("/saml-login");
+    }
+
+    @Test
+    void getLoginUrl_noServerName_returnsNull() {
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(null);
+
+        assertThat(provider.getLoginUrl(request)).isNull();
+    }
+
+    @Test
+    void getLoginUrl_anyLookupFailure_returnsNull() {
+        // Arrange: a failure anywhere in the decision must degrade to the stock login
+        SamlLoginUrlProvider failing = new SamlLoginUrlProvider(new SiteHostsStore() {
+            @Override
+            public List<String> hosts(String siteKey) {
+                return List.of(LISTED_HOST);
+            }
+
+            @Override
+            public void save(String siteKey, List<String> hosts) {
+                throw new UnsupportedOperationException();
+            }
+        }, new SiteResolver() {
+            @Override
+            public String siteKeyFor(String serverName) {
+                return SITE;
+            }
+
+            @Override
+            public boolean isModuleEnabled(String siteKey) {
+                return true;
+            }
+
+            @Override
+            public Set<String> sitesClaiming(String serverName) {
+                return Set.of();
+            }
+
+            @Override
+            public Set<String> serverNamesOf(String siteKey) {
+                return Set.of();
+            }
+        }, siteKey -> {
+            throw new IllegalStateException("jahia-authentication unavailable");
+        });
+        when(request.getServerName()).thenReturn(LISTED_HOST);
+
+        // Act / Assert
+        assertThat(failing.getLoginUrl(request)).isNull();
+        assertThat(failing.getLogoutUrl(request)).isNull();
     }
 
     @Test
     void getLoginUrl_errorDispatchAttributes_appendEncodedRedirect() {
         // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(LISTED_HOST);
         when(request.getContextPath()).thenReturn("");
         when(request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI)).thenReturn("/protected/page");
         when(request.getQueryString()).thenReturn("a=1&b=2");
@@ -117,8 +253,8 @@ class SamlLoginUrlProviderTest {
     @Test
     void getLoginUrl_forwardAttributes_appendEncodedRedirect() {
         // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(LISTED_HOST);
         when(request.getContextPath()).thenReturn("");
         when(request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI)).thenReturn(null);
         when(request.getAttribute(RequestDispatcher.FORWARD_REQUEST_URI)).thenReturn("/pretty/url");
@@ -149,8 +285,8 @@ class SamlLoginUrlProviderTest {
     @MethodSource("plainRequestCases")
     void getLoginUrl_plainRequest_appendsRedirectOnlyWhenSafe(String uri, String query, String expected) {
         // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(LISTED_HOST);
         when(request.getContextPath()).thenReturn("");
         stubPlainRequest(uri, query);
 
@@ -164,8 +300,8 @@ class SamlLoginUrlProviderTest {
     @Test
     void getLoginUrl_uriAttributeWithEmbeddedQueryString_loopGuardStillApplies() {
         // Arrange: a url-rewrite rule folded the query into the error-dispatch URI attribute itself
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(LISTED_HOST);
         when(request.getContextPath()).thenReturn("");
         when(request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI)).thenReturn("/home.connect.saml?x=y");
         when(request.getQueryString()).thenReturn(null);
@@ -188,32 +324,10 @@ class SamlLoginUrlProviderTest {
     }
 
     @Test
-    void getLogoutUrl_hostNotInList_returnsNull() {
+    void getLogoutUrl_listedHost_redirectsToPublicLandingPage() {
         // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("other.example.com");
-
-        // Act
-        String logoutUrl = provider.getLogoutUrl(request);
-
-        // Assert
-        assertThat(logoutUrl).isNull();
-    }
-
-    @Test
-    void getLogoutUrl_noConfiguration_returnsNull() {
-        // Act: hosts.isEmpty() short-circuits before any request inspection
-        String logoutUrl = provider.getLogoutUrl(request);
-
-        // Assert
-        assertThat(logoutUrl).isNull();
-    }
-
-    @Test
-    void getLogoutUrl_hostInList_redirectsToPublicLandingPage() {
-        // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(LISTED_HOST);
         when(request.getContextPath()).thenReturn("/ctx");
 
         // Act
@@ -223,10 +337,12 @@ class SamlLoginUrlProviderTest {
         assertThat(logoutUrl).isEqualTo("/ctx/cms/logout?redirect=%2Fctx%2F");
     }
 
-    private void activateWithFqdn(String fqdn) {
-        Map<String, Object> properties = new HashMap<>();
-        properties.put(SamlLoginUrlProvider.FQDN_PROPERTY, fqdn);
-        provider.activate(properties);
+    @Test
+    void getLogoutUrl_unlistedHostOfAQualifyingSite_returnsNull() {
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
+
+        assertThat(provider.getLogoutUrl(request)).isNull();
     }
 
     private void stubPlainRequest(String uri, String query) {

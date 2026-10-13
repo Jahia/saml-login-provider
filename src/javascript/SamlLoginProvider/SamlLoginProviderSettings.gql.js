@@ -1,20 +1,26 @@
 import {gql} from '@apollo/client';
 
 export const GET_SAML_LOGIN_PROVIDER_CONFIG = gql`
-    query SamlLoginProviderConfig {
+    query SamlLoginProviderConfig($siteKey: String!) {
         samlLoginProvider {
-            config {
+            config(siteKey: $siteKey) {
+                siteKey
                 fqdn
+                serverNames
+                samlConfigured
             }
         }
     }
 `;
 
 export const UPDATE_SAML_LOGIN_PROVIDER_CONFIG = gql`
-    mutation UpdateSamlLoginProviderConfig($fqdn: String) {
+    mutation UpdateSamlLoginProviderConfig($siteKey: String!, $fqdn: String) {
         samlLoginProvider {
-            update(fqdn: $fqdn) {
+            update(siteKey: $siteKey, fqdn: $fqdn) {
+                siteKey
                 fqdn
+                serverNames
+                samlConfigured
             }
         }
     }

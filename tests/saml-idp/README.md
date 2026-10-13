@@ -25,7 +25,7 @@ cp .env.example .env                 # then edit the values
 
 `setup.sh` is idempotent. It deploys the modules, starts Keycloak, imports the realm, sets the test
 user's password, has Jahia write the connector config (with a freshly generated SP keystore), waits
-until the connector answers, and only then sets the saml-login-provider host list.
+until the connectors answer, and only then sets digitall's saml-login-provider host list.
 
 Configuration comes from `.env`, or from `SAML_IDP_ENV_FILE=/path/to/file`, or from variables
 already exported — whichever is present.
@@ -37,13 +37,23 @@ already exported — whichever is present.
 | Keycloak admin | <http://localhost:8180/admin> |
 | Realm | `jahia-saml` |
 | SAML end user | `saml.tester` |
-| **Browse the SP at** | **<http://digitall.localhost:8080>** — this is what resolves to `digitall` |
-| Jahia SP entity ID | `jahia-digitall` |
-| ACS | `http://digitall.localhost:8080/home.callback.saml` |
-| Connector | site `digitall`, OSGi factory config `org.jahia.modules.auth-digitall.cfg` |
 
-`http://localhost:8080` still works for everything else, but it resolves to `systemsite`, which has
-no SAML connector — see *Things that are easy to get wrong* below.
+One SAML connector per site, each built from the host that resolves to that site, so the ACS URL
+Keycloak posts the assertion back to is always the host the visitor started on:
+
+| Host | Site | SP entity ID / Keycloak client | ACS | In its site's host list? |
+|---|---|---|---|---|
+| **<http://digitall.localhost:8080>** | `digitall` | `jahia-digitall` | `http://digitall.localhost:8080/home.callback.saml` | yes: `/start` goes straight to Keycloak |
+| <http://localhost:8080> | `systemsite` | `jahia-systemsite` | `http://localhost:8080/home.callback.saml` | no list: `/start` shows `/saml-login`, whose **Sign in with Google** goes to Keycloak |
+
+The connectors are OSGi factory configs `org.jahia.modules.auth-<site>.cfg`. The realm declares a
+client per site, each admitting only its own host in `redirectUris`. Keycloak imports the realm only
+into an empty realm, so after the realm file gains a client, recreate it:
+`docker compose up -d --force-recreate && ./setup.sh` — `setup.sh` stops with that hint when a
+client is missing.
+
+`saml.tester` has no editing rights, so after logging in, `/start` (the edit-mode entry) answers
+**403**: that is the "logged in, not an editor" page, not a failure. Browse to `/home.html` instead.
 
 ### The user mapper (wired automatically)
 
@@ -62,12 +72,14 @@ lookupUser(saml.tester) -> /users/ie/ie/ha/saml.tester
 The equivalent by hand is Administration → **digitall** → Authentication → SAML → **JCR Auth
 provider** → map `username` to **Login username** (`ssoLoginId`, the only mandatory field) → Save.
 
-### saml-login-provider's host list (set automatically)
+### saml-login-provider's host list (set automatically, per site)
 
-`setup.sh` finishes by setting the host list to `SITE_HOST` through the module's GraphQL mutation —
-visible at `http://localhost:8080/jahia/administration/samlLoginProvider` (**Hosts**). It does so
+The list is per site. `setup.sh` finishes by setting **digitall's** list to `SITE_HOST` through the
+module's GraphQL mutation — visible in digitall's administration at
+`http://localhost:8080/jahia/administration/digitall/samlLoginProvider` (**Hosts**). It does so
 only after `/home.connect.saml` on `SITE_HOST` serves the auto-submit form to Keycloak: a host in
-that list without a working connector locks every unauthenticated visitor out.
+a list without a working connector locks every unauthenticated visitor out. A list only accepts the
+site's own names (server name and aliases), and systemsite is left without one.
 
 The module matches `request.getServerName()`, so the value must be the host you browse with. Open
 `http://digitall.localhost:8080/start` in a private window: you should be carried to Keycloak and
@@ -121,7 +133,7 @@ connector bound to `digitall` is unreachable by construction, and you get
 behind Administration → Sites → digitall → Web project settings → **Server name**, so the
 configuration is visible where you would look for it. `systemsite` is untouched and
 `localhost → systemsite` still holds. You then browse the SP at `http://digitall.localhost:8080`.
-Browsing at `localhost:8080` lands on systemsite, which has no connector.
+Browsing at `localhost:8080` lands on systemsite, which has its own connector (`jahia-systemsite`).
 
 **`SITE_HOST` must be a real hostname — never `localhost` or `127.0.0.1`.** Jahia rewrites site
 URLs to *absolute* ones built from `j:serverName`, so a loopback literal gets baked into every link
@@ -180,11 +192,12 @@ is easy to miss here because `SAML2Filter` is a *global servlet filter*: the who
 with the module enabled on no site at all, so the only symptom is that
 `saml-authentication-valve` appears "not enabled on the websites" — and the per-site settings
 screen where you wire the connector's mapper is absent. `setup.sh` enables
-`jahia-authentication`, `jcr-auth-provider` and `saml-authentication-valve` on `SITE_KEY` through
-the provisioning API (`{"enable": "...", "site": "..."}`).
+`jahia-authentication`, `jcr-auth-provider`, `saml-authentication-valve` **and
+`saml-login-provider`** on digitall and systemsite through the provisioning API
+(`{"enable": "...", "site": "..."}`).
 
-`saml-login-provider` is deliberately *not* enabled on any site: it is a server-level module whose
-admin route lives under Server settings and whose permission is checked on the JCR root node.
+For `saml-login-provider` enablement is not cosmetic: the module only acts on a site where it is
+enabled *and* that has an enabled SAML connector, and its settings screen only shows there.
 
 **A SAML protocol mapper must not repeat its attribute name as `friendly.name`.** pac4j files each
 assertion attribute under its `Name` *and* under its `FriendlyName`; when the two are equal the
@@ -229,7 +242,7 @@ once your session ends. `HostList.isValid()` checks hostname syntax, not SAML re
 is a plain file, so no UI is needed to recover:
 
 ```bash
-docker exec jahia sh -c 'echo "fqdn=" > /var/jahia/karaf/etc/org.jahia.community.samlloginprovider.cfg'
+docker exec jahia rm -f /var/jahia/karaf/etc/org.jahia.community.samlloginprovider.site-digitall.cfg
 ```
 
 An empty list is the fail-safe "inactive everywhere" state.

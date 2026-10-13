@@ -2,8 +2,8 @@
 
 Redirects unauthenticated users straight to the SAML connect endpoint (`/home.connect.saml`)
 instead of the Jahia login page on configured hosts, and points the logout button to a public
-landing page so logout is not immediately cancelled by a silent SAML re-login. Ships a React
-administration UI (Server Administration) backed by GraphQL.
+landing page so logout is not immediately cancelled by a silent SAML re-login. Configured **per
+site**, from a React screen in each site's administration, backed by GraphQL.
 
 # Installation
 
@@ -15,17 +15,26 @@ administration UI (Server Administration) backed by GraphQL.
 
 ## Administration
 
-- Go to **Administration → Server settings → Configuration → SAML auto-login**
-- Fill in the comma-separated list of hosts (FQDNs) the automatic SAML login applies to
-- Leave the list empty to disable the module entirely (fail-safe default)
+- Go to **Administration**, select the site, then **SAML auto-login**
+  (`/jahia/administration/<siteKey>/samlLoginProvider`)
+- Fill in the comma-separated list of **this site's** hosts that should go straight to SAML login.
+  The screen shows the hosts the site answers on (its server name and aliases, set in the site's
+  settings); only those are accepted
+- Leave the list empty to turn the module off for that site (fail-safe default)
 - Click **Save**
 
-This setting is **server-wide** — it is shared by all sites, and the admin screen itself lives
-under Server settings (not under any particular site) to reflect that.
+A host declared by several sites (Jahia allows it; stock `localhost` is the usual case) cannot be
+listed, and keeps the standard login: Jahia would serve it from an arbitrary one of those sites.
+
+Each site has its own list, and a list only ever applies to requests for its own site: a request
+is matched to the site its host resolves to — the same lookup the SAML connect endpoint uses — and
+only that site's list is consulted. The lists are stored as
+`karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, one file per configured site.
 
 ### Host List Format
 
-The `fqdn` field accepts a comma-separated list of hostnames. Each hostname is validated as follows:
+The `fqdn` field accepts a comma-separated list of hostnames. Each must be one of the site's own
+names (server name or alias), and is otherwise validated as follows:
 
 - **RFC 1123 labels**: Each dot-separated label is 1–63 characters, containing only letters, digits, and hyphens; hyphens cannot start or end a label
 - **Single-label hosts** (e.g., `localhost`) and **IPv4 literals** (e.g., `192.168.1.1`) are accepted, for local/test setups and IP-based access
@@ -33,27 +42,35 @@ The `fqdn` field accepts a comma-separated list of hostnames. Each hostname is v
 - **Maximum length**: 253 characters per hostname
 - Whitespace is trimmed automatically; case is normalized to lowercase
 
-### Critical Deployment Constraint
+### Prerequisites on the site
 
-**Every host listed in the `fqdn` field must have the SAML authentication valve (saml-authentication-valve module) properly configured and enabled.** If you add a host that lacks SAML valve configuration, users attempting to log in on that host will be redirected to `/home.connect.saml`, which will respond with HTTP 400 and provide no fallback login method — effectively locking out all users on that host. Verify SAML valve setup before adding hosts to this list.
+The module only acts on a site where it is **enabled** (Administration → the site → Modules) and
+that has **SAML authentication set up**: an enabled saml-authentication-valve connector, configured
+in the site's Authentication settings or as a `org.jahia.modules.auth-<siteKey>.cfg` file.
+Anywhere else the standard Jahia login is untouched. This also means a listed host can never send
+visitors to a SAML endpoint that cannot serve them: without a connector, nobody is redirected. The
+settings screen warns when the site has no connector yet.
 
 ## Behavior
 
+Decided by the site the request's host resolves to. On a site where the module is enabled and SAML
+is set up:
+
 | Host | Login | Logout |
 |------|-------|--------|
-| In the configured list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
-| Not in the list | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
-| List empty (not configured) | Standard Jahia `/cms/login` page everywhere | Standard behavior |
+| In the site's list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
+| Any other host of the site — including every host when the list is empty | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
+
+Everywhere else — module not enabled on the site, no SAML connector on it, or a host that resolves
+to no single site — the standard Jahia `/cms/login` page and logout are used.
 
 ## Permission
 
-Access to the settings screen requires the `samlLoginProviderAdmin` permission, a genuine
-server-level permission checked on the JCR root node (declared as a child of Jahia's built-in
-`admin` "server settings" permission — see `src/main/import/permissions.xml`). It is **not** a
-per-site permission: this configuration affects every site and host on the platform, so holding
-a per-site admin role must never be enough to change it. Assign this permission via
-**Administration → Server settings → Users and roles → Roles & permissions** (server-level
-roles).
+Access to a site's settings screen requires the `siteAdminSamlLoginProvider` permission **on that
+site**, checked on the site node (declared under Jahia's `site-admin` permission — see
+`src/main/import/permissions.xml`), so site administrators manage their own site. Because a site's
+list only applies to requests resolving to that site and only accepts that site's own names,
+holding the permission on one site gives no control over any other.
 
 ## GraphQL API
 
@@ -62,27 +79,26 @@ project's convention for grouping a module's operations, both the query and the 
 nested under a single `samlLoginProvider` namespace field rather than added as flat root fields.
 
 ```graphql
-# Retrieve the current configuration
+# Retrieve a site's configuration, and the hosts it may list
 query {
   samlLoginProvider {
-    config {
+    config(siteKey: "digitall") {
       fqdn
+      serverNames
     }
   }
 }
 
-# Update the configuration (server-wide; empty fqdn disables the redirect)
+# Update a site's configuration (empty fqdn turns it off for that site)
 mutation {
   samlLoginProvider {
-    update(fqdn: "edit.jahia.com,editpp.jahia.com") {
+    update(siteKey: "digitall", fqdn: "www.digitall.com") {
       fqdn
     }
   }
 }
 ```
 
-Both `config` and `update` accept an optional `siteKey` argument, kept for caller-context/audit
-purposes only (e.g. which admin site tab a request originated from). It does **not** scope
-storage and has **no effect on authorization** — access is always gated by the genuine
-server-level `samlLoginProviderAdmin` permission, regardless of the value (or absence) of
-`siteKey`.
+`siteKey` is required: it selects the site whose list is read or written, and the
+`siteAdminSamlLoginProvider` permission is checked on that site. `update` rejects any host that is
+not the site's server name or one of its aliases.

@@ -4,16 +4,13 @@ import org.jahia.params.valves.LoginUrlProvider;
 import org.jahia.params.valves.LogoutUrlProvider;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
-import org.osgi.service.component.annotations.Modified;
+import org.osgi.service.component.annotations.Reference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Replaces the Jahia login page with the SAML connect endpoint provided by the
@@ -44,32 +41,27 @@ import java.util.concurrent.atomic.AtomicReference;
  * parameter, falling back to server-name resolution — no parameter is needed
  * as long as the virtual host (e.g. edit.jahia.com) is declared on the site.
  *
- * <p><strong>Host scoping (fail-safe by default):</strong> the behavior is
- * driven by the comma-separated {@code fqdn} property (file
- * {@code karaf/etc/org.jahia.community.samlloginprovider.cfg}, editable from
- * the React administration UI):
+ * <p><strong>Per-site behavior (fail-safe by default):</strong> a request is routed by the site its
+ * host resolves to -- the same lookup the SAML connect endpoint uses to pick its connector. The
+ * module only acts on a site where it is <em>enabled</em> and that has <em>SAML authentication set
+ * up</em> (an enabled saml-authentication-valve connector, see {@link SamlSetup}). On such a site:
  * <ul>
- * <li><em>host in the list</em> — straight redirect to the SAML connect
- * endpoint (no login form at all);</li>
- * <li><em>configured, host NOT in the list</em> — redirect to
- * {@value #CHOICE_LOGIN_PATH} (served by {@link SamlLoginPageFilter}): a page
- * identical to the standard login form plus a "Sign in with Google" button,
- * so users choose between local credentials and Google SAML;</li>
- * <li><em>property absent or blank</em> — provider inactive: both methods
- * return {@code null} and Jahia serves the stock {@code /cms/login} page and
- * default logout everywhere. This protects against lockouts — an unconfigured
- * deployment must never alter the login flow.</li>
+ * <li><em>host in the site's list</em> ({@link SiteHostsStore}) -- straight redirect to the SAML
+ * connect endpoint (no login form at all);</li>
+ * <li><em>any other host of the site, including when the site has no list</em> -- redirect to
+ * {@value #CHOICE_LOGIN_PATH} (served by {@link SamlLoginPageFilter}): the standard login form plus
+ * a "Sign in with Google" button, so users choose between local credentials and SAML.</li>
  * </ul>
+ * Everywhere else -- module not enabled, no SAML connector, or a host resolving to no single site --
+ * both methods return {@code null} and Jahia serves the stock {@code /cms/login} page and default
+ * logout. Requiring the connector means nobody is ever sent to a SAML endpoint that cannot serve
+ * them, and no Google button is offered that would lead to a 400.
+ *
+ * <p>Only the request's own site is consulted, so an administrator of one site cannot change how
+ * any other site logs its visitors in.
  */
-@Component(immediate = true, service = {LoginUrlProvider.class, LogoutUrlProvider.class},
-        configurationPid = SamlLoginUrlProvider.CONFIG_PID)
+@Component(immediate = true, service = {LoginUrlProvider.class, LogoutUrlProvider.class})
 public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider {
-
-    /** Configuration PID: drop {@code <PID>.cfg} in {@code karaf/etc} to configure. */
-    public static final String CONFIG_PID = "org.jahia.community.samlloginprovider";
-
-    /** Comma-separated hosts (FQDNs) the automatic SAML authentication applies to; blank = disabled. */
-    public static final String FQDN_PROPERTY = "fqdn";
 
     /** Choice login page (credentials or Google SAML) served by {@link SamlLoginPageFilter}. */
     public static final String CHOICE_LOGIN_PATH = "/saml-login";
@@ -83,35 +75,34 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     /** Same cap core's ErrorServlet applies to its own return URLs. */
     private static final int MAX_REDIRECT_LENGTH = 2048;
 
-    /**
-     * Configured lower-cased hosts; empty = provider inactive. Held in an
-     * {@link AtomicReference} and always replaced wholesale with a new immutable
-     * set (never mutated in place), so concurrent request threads atomically see
-     * either the old or the new configuration.
-     */
-    private final AtomicReference<Set<String>> hosts = new AtomicReference<>(Collections.emptySet());
+    private static final Logger LOGGER = LoggerFactory.getLogger(SamlLoginUrlProvider.class);
+
+    /** Where a request goes, decided by the site its host resolves to. */
+    private enum Route { INACTIVE, SAML_CONNECT, CHOICE_PAGE }
+
+    private final SiteHostsStore siteHostsStore;
+    private final SiteResolver siteResolver;
+    private final SamlSetup samlSetup;
 
     @Activate
-    @Modified
-    public void activate(Map<String, ?> properties) {
-        Object value = properties.get(FQDN_PROPERTY);
-        String configured = value == null ? "" : value.toString();
-        // Reuse HostList's parsing (comma-split/trim/filter/lowercase) rather than
-        // duplicating it here, so the two call sites can never drift apart.
-        hosts.set(Collections.unmodifiableSet(new HashSet<>(HostList.parse(configured))));
+    public SamlLoginUrlProvider(@Reference SiteHostsStore siteHostsStore, @Reference SiteResolver siteResolver,
+                                @Reference SamlSetup samlSetup) {
+        this.siteHostsStore = siteHostsStore;
+        this.siteResolver = siteResolver;
+        this.samlSetup = samlSetup;
     }
 
     @Override
     public String getLoginUrl(HttpServletRequest request) {
-        Set<String> activeHosts = hosts.get();
-        if (activeHosts.isEmpty()) {
+        Route route = route(request);
+        if (route == Route.INACTIVE) {
             // fail-safe default: null is load-bearing — LoginConfig filters
             // blank results and falls back to the standard /cms/login page
             return null;
         }
-        // Configured host: straight SAML redirect. Any other host: choice page
+        // Listed host: straight SAML redirect. Any other host of the site: choice page
         // (standard credentials form + "Sign in with Google" SAML button).
-        String path = matches(request, activeHosts) ? SAML_CONNECT_PATH : CHOICE_LOGIN_PATH;
+        String path = route == Route.SAML_CONNECT ? SAML_CONNECT_PATH : CHOICE_LOGIN_PATH;
         String loginUrl = request.getContextPath() + path;
         String originalUrl = resolveOriginalUrl(request);
         if (originalUrl == null) {
@@ -134,7 +125,7 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         // LogoutUrlProvider on the same platform makes precedence dependent on
         // OSGi bind order, and our off-host null would suppress it. This
         // module assumes it is the only LogoutUrlProvider deployed.
-        if (!appliesTo(request)) {
+        if (route(request) != Route.SAML_CONNECT) {
             return null;
         }
         // Send the user to a public landing page after logout. The default
@@ -197,14 +188,25 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         return originalUrl.length() > MAX_REDIRECT_LENGTH ? null : originalUrl;
     }
 
-    private boolean appliesTo(HttpServletRequest request) {
-        Set<String> activeHosts = hosts.get();
-        // fail-safe default: not configured = inactive everywhere
-        return !activeHosts.isEmpty() && matches(request, activeHosts);
-    }
-
-    private static boolean matches(HttpServletRequest request, Set<String> activeHosts) {
+    /**
+     * Routes by the site the host resolves to, consulting that site only. Any failure degrades to
+     * {@link Route#INACTIVE}: the stock login must keep working whatever happens.
+     */
+    private Route route(HttpServletRequest request) {
         String serverName = request.getServerName();
-        return serverName != null && activeHosts.contains(serverName.toLowerCase(Locale.ROOT));
+        if (serverName == null) {
+            return Route.INACTIVE;
+        }
+        String host = serverName.toLowerCase(Locale.ROOT);
+        try {
+            String siteKey = siteResolver.siteKeyFor(host);
+            if (siteKey == null || !siteResolver.isModuleEnabled(siteKey) || !samlSetup.isConfigured(siteKey)) {
+                return Route.INACTIVE;
+            }
+            return siteHostsStore.hosts(siteKey).contains(host) ? Route.SAML_CONNECT : Route.CHOICE_PAGE;
+        } catch (RuntimeException e) {
+            LOGGER.warn("Could not decide the login route of host {}; leaving its login flow unchanged", host, e);
+            return Route.INACTIVE;
+        }
     }
 }
