@@ -44,7 +44,7 @@ Keycloak posts the assertion back to is always the host the visitor started on:
 | Host | Site | SP entity ID / Keycloak client | ACS | In its site's host list? |
 |---|---|---|---|---|
 | **<http://digitall.localhost:8080>** | `digitall` | `jahia-digitall` | `http://digitall.localhost:8080/home.callback.saml` | yes: `/start` goes straight to Keycloak |
-| <http://localhost:8080> | `systemsite` | `jahia-systemsite` | `http://localhost:8080/home.callback.saml` | systemsite has no list: stock Jahia login. The connector makes SAML work there as soon as systemsite is given one |
+| <http://localhost:8080> | `systemsite` | `jahia-systemsite` | `http://localhost:8080/home.callback.saml` | no list: `/start` shows `/saml-login`, whose **Sign in with Google** goes to Keycloak |
 
 The connectors are OSGi factory configs `org.jahia.modules.auth-<site>.cfg`. The realm declares a
 client per site, each admitting only its own host in `redirectUris`. Keycloak imports the realm only
@@ -192,11 +192,12 @@ is easy to miss here because `SAML2Filter` is a *global servlet filter*: the who
 with the module enabled on no site at all, so the only symptom is that
 `saml-authentication-valve` appears "not enabled on the websites" — and the per-site settings
 screen where you wire the connector's mapper is absent. `setup.sh` enables
-`jahia-authentication`, `jcr-auth-provider` and `saml-authentication-valve` on `SITE_KEY` through
-the provisioning API (`{"enable": "...", "site": "..."}`).
+`jahia-authentication`, `jcr-auth-provider`, `saml-authentication-valve` **and
+`saml-login-provider`** on digitall and systemsite through the provisioning API
+(`{"enable": "...", "site": "..."}`).
 
-`saml-login-provider` is deliberately *not* enabled on any site: it is a server-level module whose
-admin route lives under Server settings and whose permission is checked on the JCR root node.
+For `saml-login-provider` enablement is not cosmetic: the module only acts on a site where it is
+enabled *and* that has an enabled SAML connector, and its settings screen only shows there.
 
 **A SAML protocol mapper must not repeat its attribute name as `friendly.name`.** pac4j files each
 assertion attribute under its `Name` *and* under its `FriendlyName`; when the two are equal the

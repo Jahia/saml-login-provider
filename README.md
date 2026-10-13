@@ -42,19 +42,27 @@ names (server name or alias), and is otherwise validated as follows:
 - **Maximum length**: 253 characters per hostname
 - Whitespace is trimmed automatically; case is normalized to lowercase
 
-### Critical Deployment Constraint
+### Prerequisites on the site
 
-**Every host listed for a site must be served by a working SAML authentication valve (saml-authentication-valve module) connector for that site.** If you add a host that lacks one, users attempting to log in on that host will be redirected to `/home.connect.saml`, which will respond with HTTP 400 and provide no fallback login method — effectively locking out all users on that host. Verify SAML valve setup before adding hosts to this list.
+The module only acts on a site where it is **enabled** (Administration → the site → Modules) and
+that has **SAML authentication set up**: an enabled saml-authentication-valve connector, configured
+in the site's Authentication settings or as a `org.jahia.modules.auth-<siteKey>.cfg` file.
+Anywhere else the standard Jahia login is untouched. This also means a listed host can never send
+visitors to a SAML endpoint that cannot serve them: without a connector, nobody is redirected. The
+settings screen warns when the site has no connector yet.
 
 ## Behavior
 
-Decided by the site the request's host resolves to:
+Decided by the site the request's host resolves to. On a site where the module is enabled and SAML
+is set up:
 
 | Host | Login | Logout |
 |------|-------|--------|
-| In its site's list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
-| Another host of a site that has a list | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
-| Host of a site without a list, or of no site | Standard Jahia `/cms/login` page | Standard behavior |
+| In the site's list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
+| Any other host of the site — including every host when the list is empty | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
+
+Everywhere else — module not enabled on the site, no SAML connector on it, or a host that resolves
+to no single site — the standard Jahia `/cms/login` page and logout are used.
 
 ## Permission
 

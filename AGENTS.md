@@ -1,25 +1,30 @@
 # saml-login-provider
 
-Jahia OSGi module that redirects unauthenticated users to the SAML connect endpoint on configured
-hosts. The configuration is **per site**: each site lists which of its own hosts go straight to
-SAML. Admin UI at `/jahia/administration/<siteKey>/samlLoginProvider` (the site's administration).
+Jahia OSGi module that replaces the login page of a site with a SAML-aware one. On a site where the
+module is **enabled** and that has **SAML authentication set up** (an enabled saml-authentication-valve
+connector), unauthenticated visitors get `/saml-login` (credentials form + "Sign in with Google"),
+and the hosts in that site's list go straight to the SAML connect endpoint. Admin UI at
+`/jahia/administration/<siteKey>/samlLoginProvider` (the site's administration, shown only where
+the module is enabled).
 
 ## Key Facts
 
 - **artifactId**: `saml-login-provider` | **version**: `2.1.0-SNAPSHOT`
 - **Java package**: `org.jahia.community.modules.samlloginprovider`
-- **jahia-depends**: `default,siteSettings,graphql-dxm-provider`
+- **jahia-depends**: `default,siteSettings,graphql-dxm-provider,jahia-authentication` (whether a
+  site has SAML set up is read from jahia-authentication's `SettingsService`)
 - Configuration stored as one file-backed OSGi **factory** configuration per site
   (`karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, properties `siteKey`,
   `fqdn`), not JCR — see `FileSiteHostsStore`
-- Fail-safe default: a site without a list (and a host resolving to no site) keeps Jahia's stock
-  login
+- Fail-safe default: a site where the module is not enabled, a site with no SAML connector, and a
+  host resolving to no single site all keep Jahia's stock login
 
 ## Architecture
 
 | Class | Role |
 |-------|------|
-| `SamlLoginUrlProvider` | `LoginUrlProvider`/`LogoutUrlProvider` OSGi services; routes by the site the host resolves to |
+| `SamlLoginUrlProvider` | `LoginUrlProvider`/`LogoutUrlProvider` OSGi services; routes by the site the host resolves to, only where the module is enabled and SAML is set up |
+| `SamlSetup` / `JahiaAuthSamlSetup` | Whether a site has an enabled SAML connector (`SettingsService.getConnectorConfig(site, "Saml")`, property `enabled`) |
 | `SamlLoginPageFilter` | Serves `/saml-login` (credentials form + "Sign in with Google") |
 | `SiteHostsStore` / `FileSiteHostsStore` | Per-site host lists; the file-backed `ManagedServiceFactory` (factory PID `org.jahia.community.samlloginprovider.site`) that reads and atomically writes one `.cfg` per site |
 | `SiteResolver` / `JahiaSiteResolver` | Host → site key (`JahiaSitesService.getSitenameByServerName`, the lookup the SAML connect endpoint uses) and site → its server names |
