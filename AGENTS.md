@@ -9,7 +9,7 @@ the module is enabled).
 
 ## Key Facts
 
-- **artifactId**: `saml-login-provider` | **version**: `1.0.0`
+- **artifactId**: `saml-login-provider` | **version**: `1.0.1-SNAPSHOT`
 - **Java package**: `org.jahia.community.modules.samlloginprovider`
 - **jahia-depends**: `default,siteSettings,graphql-dxm-provider,jahia-authentication` (whether a
   site has SAML set up is read from jahia-authentication's `SettingsService`)

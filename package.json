@@ -1,6 +1,6 @@
 {
   "name": "@jahia/saml-login-provider",
-  "version": "1.0.0",
+  "version": "1.0.1-SNAPSHOT",
   "scripts": {
     "build": "yarn webpack",
     "webpack": "webpack",
