@@ -13,6 +13,12 @@ public interface SiteResolver {
      */
     String siteKeyFor(String serverName);
 
+    /**
+     * True when the sites were read and none of them declares this server name -- {@code false} for
+     * a host of one or several sites, for {@code null}, and when the sites could not be read.
+     */
+    boolean isUnclaimed(String serverName);
+
     /** True when saml-login-provider is enabled on the site (directly or as a dependency). */
     boolean isModuleEnabled(String siteKey);
 

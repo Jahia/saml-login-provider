@@ -293,6 +293,98 @@ class SamlLoginPageFilterTest {
         }
     }
 
+    @Test
+    void doFilter_hostOfNoSite_googleFormNamesSystemsite() throws Exception {
+        // Arrange: the valve resolves a site from the host or from siteKey; a host of no site needs siteKey
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("edit.example.com", null, true));
+
+        // Act
+        filter.doFilter(request, response, chain);
+
+        // Assert
+        assertThat(googleForm(body.toString())).contains("name=\"siteKey\" value=\"systemsite\"");
+    }
+
+    @Test
+    void doFilter_hostOfASite_googleFormLeavesTheSiteToTheValve() throws Exception {
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("digitall.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("digitall.example.com", "digitall", false));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).doesNotContain("siteKey");
+    }
+
+    @Test
+    void doFilter_noSiteResolver_googleFormHasNoSiteKey() throws Exception {
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).doesNotContain("siteKey");
+    }
+
+    @Test
+    void doFilter_resolverFailure_stillServesThePage_withoutSiteKey() throws Exception {
+        // Arrange
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        SiteResolver failing = org.mockito.Mockito.mock(SiteResolver.class);
+        when(failing.siteKeyFor("edit.example.com")).thenThrow(new IllegalStateException("boom"));
+        filter.setSiteResolver(failing);
+
+        // Act
+        filter.doFilter(request, response, chain);
+
+        // Assert
+        assertThat(googleForm(body.toString())).doesNotContain("siteKey");
+    }
+
+    private static String googleForm(String page) {
+        int start = page.indexOf("<form id=\"googleLoginForm\"");
+        return page.substring(start, page.indexOf("</form>", start));
+    }
+
+    private static SiteResolver resolverWhere(String host, String siteKey, boolean unclaimed) {
+        return new SiteResolver() {
+            @Override
+            public String siteKeyFor(String serverName) {
+                return host.equals(serverName) ? siteKey : null;
+            }
+
+            @Override
+            public boolean isUnclaimed(String serverName) {
+                return host.equals(serverName) && unclaimed;
+            }
+
+            @Override
+            public boolean isModuleEnabled(String key) {
+                return true;
+            }
+
+            @Override
+            public java.util.Set<String> sitesClaiming(String serverName) {
+                return java.util.Set.of();
+            }
+
+            @Override
+            public java.util.Set<String> serverNamesOf(String key) {
+                return java.util.Set.of();
+            }
+        };
+    }
+
     private void assertLoginErrorMapsToMessage(String loginErrorCode, String expectedMessage) throws Exception {
         // Arrange
         StringWriter body = new StringWriter();

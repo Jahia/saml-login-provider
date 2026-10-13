@@ -25,6 +25,9 @@ const isValidHostList = value => parseHosts(value)
         HOST_PATTERN.test(host) &&
         host.split('.').every(label => label.length <= MAX_LABEL_LENGTH));
 
+// Hosts that no site declares fall back to this site's settings (see LoginSite on the server).
+const SYSTEMSITE = 'systemsite';
+
 // Which site the setting belongs to, and whether that site can use it at all yet.
 const SiteScope = ({siteKey, isSamlConfigured}) => {
     const {t} = useTranslation('saml-login-provider');
@@ -32,6 +35,7 @@ const SiteScope = ({siteKey, isSamlConfigured}) => {
         <>
             <div className={styles.slp_scope_warning} role="note">
                 <strong>{t('samlLoginProvider.scope', {siteKey})}</strong>
+                {siteKey === SYSTEMSITE && <p>{t('samlLoginProvider.scopeSystemsite')}</p>}
             </div>
             {!isSamlConfigured && (
                 <div id="slp-saml-missing" className={`${styles.slp_alert} ${styles['slp_alert--info']}`} role="note">
@@ -108,8 +112,9 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
             return;
         }
 
-        // Mirrors the server-side check: only this site's own names can be routed here.
-        if (!parseHosts(fqdn).every(host => serverNames.includes(host))) {
+        // Mirrors the server-side check: only this site's own names can be routed here. Systemsite
+        // may also list hosts that no site declares, which only the server can tell.
+        if (siteKey !== SYSTEMSITE && !parseHosts(fqdn).every(host => serverNames.includes(host))) {
             setFqdnError(t('samlLoginProvider.errors.fqdn.notSiteHost', {serverNames: serverNames.join(', ')}));
             document.getElementById('slp-fqdn')?.focus();
             return;

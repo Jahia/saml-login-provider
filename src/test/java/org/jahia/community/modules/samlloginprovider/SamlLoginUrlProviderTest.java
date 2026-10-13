@@ -40,6 +40,8 @@ class SamlLoginUrlProviderTest {
     private final Set<String> moduleEnabledOn = new HashSet<>();
     /** Sites with a SAML connector set up. */
     private final Set<String> samlConfiguredOn = new HashSet<>();
+    /** Hosts declared by several sites. */
+    private final Set<String> sharedHosts = new HashSet<>();
 
     private SamlLoginUrlProvider provider;
 
@@ -49,6 +51,11 @@ class SamlLoginUrlProviderTest {
             @Override
             public String siteKeyFor(String serverName) {
                 return siteByHost.get(serverName);
+            }
+
+            @Override
+            public boolean isUnclaimed(String serverName) {
+                return !siteByHost.containsKey(serverName) && !sharedHosts.contains(serverName);
             }
 
             @Override
@@ -161,10 +168,65 @@ class SamlLoginUrlProviderTest {
     }
 
     @Test
-    void getLoginUrl_hostResolvingToNoSite_returnsNull() {
+    void getLoginUrl_hostOfNoSite_whenSystemsiteDoesNotQualify_returnsNull() {
+        // Arrange: the host falls back to systemsite, which has neither the module nor SAML here
         hostsBySite.put(SITE, List.of(LISTED_HOST));
         when(request.getServerName()).thenReturn("unknown.example.com");
 
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request)).isNull();
+    }
+
+    @Test
+    void getLoginUrl_hostOfNoSite_fallsBackToSystemsite_choicePage() {
+        // Arrange: e.g. an editing host declared by no site, systemsite set up for SAML
+        moduleEnabledOn.add(LoginSite.SYSTEMSITE);
+        samlConfiguredOn.add(LoginSite.SYSTEMSITE);
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/start", null);
+
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request)).isEqualTo("/saml-login?redirect=%2Fstart");
+    }
+
+    @Test
+    void getLoginUrl_hostOfNoSite_listedBySystemsite_goesToSamlWithTheSystemsiteKey() {
+        // Arrange: the valve cannot find a site from such a host, so the connect URL must name it
+        moduleEnabledOn.add(LoginSite.SYSTEMSITE);
+        samlConfiguredOn.add(LoginSite.SYSTEMSITE);
+        hostsBySite.put(LoginSite.SYSTEMSITE, List.of("edit.example.com"));
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(request.getContextPath()).thenReturn("/ctx");
+        stubPlainRequest("/start", null);
+
+        // Act / Assert
+        assertThat(provider.getLoginUrl(request))
+                .isEqualTo("/ctx/home.connect.saml?siteKey=systemsite&redirect=%2Fstart");
+        assertThat(provider.getLogoutUrl(request)).isEqualTo("/ctx/cms/logout?redirect=%2Fctx%2F");
+    }
+
+    @Test
+    void getLoginUrl_hostOfNoSite_listedBySystemsite_withoutRedirect_keepsTheSiteKey() {
+        moduleEnabledOn.add(LoginSite.SYSTEMSITE);
+        samlConfiguredOn.add(LoginSite.SYSTEMSITE);
+        hostsBySite.put(LoginSite.SYSTEMSITE, List.of("edit.example.com"));
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(request.getContextPath()).thenReturn("");
+        stubPlainRequest("/home.connect.saml", null);
+
+        assertThat(provider.getLoginUrl(request)).isEqualTo("/home.connect.saml?siteKey=systemsite");
+    }
+
+    @Test
+    void getLoginUrl_hostSharedBySeveralSites_neverFallsBack() {
+        // Arrange: systemsite qualifies, but a shared host is never governed by any single site
+        moduleEnabledOn.add(LoginSite.SYSTEMSITE);
+        samlConfiguredOn.add(LoginSite.SYSTEMSITE);
+        sharedHosts.add("shared.example.com");
+        when(request.getServerName()).thenReturn("shared.example.com");
+
+        // Act / Assert
         assertThat(provider.getLoginUrl(request)).isNull();
     }
 
@@ -208,6 +270,11 @@ class SamlLoginUrlProviderTest {
             @Override
             public String siteKeyFor(String serverName) {
                 return SITE;
+            }
+
+            @Override
+            public boolean isUnclaimed(String serverName) {
+                return false;
             }
 
             @Override

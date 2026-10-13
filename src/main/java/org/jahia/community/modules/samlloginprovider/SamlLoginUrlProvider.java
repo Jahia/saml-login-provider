@@ -52,7 +52,9 @@ import java.util.Locale;
  * {@value #CHOICE_LOGIN_PATH} (served by {@link SamlLoginPageFilter}): the standard login form plus
  * a "Sign in with Google" button, so users choose between local credentials and SAML.</li>
  * </ul>
- * Everywhere else -- module not enabled, no SAML connector, or a host resolving to no single site --
+ * A host that NO site declares (typically the editing host) is governed by systemsite the same way;
+ * its SAML URL then names {@code siteKey=systemsite}, since the valve cannot find a site from such a
+ * host. Everywhere else -- module not enabled, no SAML connector, or a host shared by several sites --
  * both methods return {@code null} and Jahia serves the stock {@code /cms/login} page and default
  * logout. Requiring the connector means nobody is ever sent to a SAML endpoint that cannot serve
  * them, and no Google button is offered that would lead to a 400.
@@ -78,7 +80,20 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     private static final Logger LOGGER = LoggerFactory.getLogger(SamlLoginUrlProvider.class);
 
     /** Where a request goes, decided by the site its host resolves to. */
-    private enum Route { INACTIVE, SAML_CONNECT, CHOICE_PAGE }
+    private enum Destination { INACTIVE, SAML_CONNECT, CHOICE_PAGE }
+
+    /** The destination, and the site to name to the valve ({@code null}: it resolves the host). */
+    private static final class Route {
+        private static final Route INACTIVE = new Route(Destination.INACTIVE, null);
+
+        private final Destination destination;
+        private final String explicitSiteKey;
+
+        private Route(Destination destination, String explicitSiteKey) {
+            this.destination = destination;
+            this.explicitSiteKey = explicitSiteKey;
+        }
+    }
 
     private final SiteHostsStore siteHostsStore;
     private final SiteResolver siteResolver;
@@ -95,20 +110,27 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     @Override
     public String getLoginUrl(HttpServletRequest request) {
         Route route = route(request);
-        if (route == Route.INACTIVE) {
+        if (route.destination == Destination.INACTIVE) {
             // fail-safe default: null is load-bearing — LoginConfig filters
             // blank results and falls back to the standard /cms/login page
             return null;
         }
         // Listed host: straight SAML redirect. Any other host of the site: choice page
         // (standard credentials form + "Sign in with Google" SAML button).
-        String path = route == Route.SAML_CONNECT ? SAML_CONNECT_PATH : CHOICE_LOGIN_PATH;
-        String loginUrl = request.getContextPath() + path;
-        String originalUrl = resolveOriginalUrl(request);
-        if (originalUrl == null) {
-            return loginUrl;
+        boolean connect = route.destination == Destination.SAML_CONNECT;
+        StringBuilder loginUrl = new StringBuilder(request.getContextPath())
+                .append(connect ? SAML_CONNECT_PATH : CHOICE_LOGIN_PATH);
+        char separator = '?';
+        if (connect && route.explicitSiteKey != null) {
+            // The choice page names the site in its own Google form (see SamlLoginPageFilter)
+            loginUrl.append(separator).append("siteKey=").append(WebUtils.urlEncode(route.explicitSiteKey));
+            separator = '&';
         }
-        return loginUrl + "?redirect=" + WebUtils.urlEncode(originalUrl);
+        String originalUrl = resolveOriginalUrl(request);
+        if (originalUrl != null) {
+            loginUrl.append(separator).append("redirect=").append(WebUtils.urlEncode(originalUrl));
+        }
+        return loginUrl.toString();
     }
 
     @Override
@@ -125,7 +147,7 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         // LogoutUrlProvider on the same platform makes precedence dependent on
         // OSGi bind order, and our off-host null would suppress it. This
         // module assumes it is the only LogoutUrlProvider deployed.
-        if (route(request) != Route.SAML_CONNECT) {
+        if (route(request).destination != Destination.SAML_CONNECT) {
             return null;
         }
         // Send the user to a public landing page after logout. The default
@@ -189,8 +211,8 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     }
 
     /**
-     * Routes by the site the host resolves to, consulting that site only. Any failure degrades to
-     * {@link Route#INACTIVE}: the stock login must keep working whatever happens.
+     * Routes by the site governing the host ({@link LoginSite}), consulting that site only. Any
+     * failure degrades to {@link Route#INACTIVE}: the stock login must keep working whatever happens.
      */
     private Route route(HttpServletRequest request) {
         String serverName = request.getServerName();
@@ -199,11 +221,17 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         }
         String host = serverName.toLowerCase(Locale.ROOT);
         try {
-            String siteKey = siteResolver.siteKeyFor(host);
-            if (siteKey == null || !siteResolver.isModuleEnabled(siteKey) || !samlSetup.isConfigured(siteKey)) {
+            LoginSite site = LoginSite.of(siteResolver, host);
+            if (site == null) {
                 return Route.INACTIVE;
             }
-            return siteHostsStore.hosts(siteKey).contains(host) ? Route.SAML_CONNECT : Route.CHOICE_PAGE;
+            String siteKey = site.siteKey();
+            if (!siteResolver.isModuleEnabled(siteKey) || !samlSetup.isConfigured(siteKey)) {
+                return Route.INACTIVE;
+            }
+            Destination destination = siteHostsStore.hosts(siteKey).contains(host)
+                    ? Destination.SAML_CONNECT : Destination.CHOICE_PAGE;
+            return new Route(destination, site.isFallback() ? siteKey : null);
         } catch (RuntimeException e) {
             LOGGER.warn("Could not decide the login route of host {}; leaving its login flow unchanged", host, e);
             return Route.INACTIVE;

@@ -20,7 +20,8 @@ site**, from a React screen in each site's administration, backed by GraphQL.
 - Fill in the comma-separated list of **this site's** hosts that should go straight to SAML login.
   The screen shows the hosts the site answers on (its server name and aliases, set in the site's
   settings); only those are accepted
-- Leave the list empty to turn the module off for that site (fail-safe default)
+- Leave the list empty to send nobody straight to SAML: every host of the site then gets the
+  choice login page (see [Behavior](#behavior))
 - Click **Save**
 
 A host declared by several sites (Jahia allows it; stock `localhost` is the usual case) cannot be
@@ -30,6 +31,29 @@ Each site has its own list, and a list only ever applies to requests for its own
 is matched to the site its host resolves to — the same lookup the SAML connect endpoint uses — and
 only that site's list is consulted. The lists are stored as
 `karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, one file per configured site.
+A saved list takes effect within a second; enabling the module on a site or changing a site's
+server names takes up to about 5 seconds to be picked up.
+
+### Hosts no site declares (editing host)
+
+A host that **no** site declares — typically the editing host, e.g. `edit.example.com`, which Jahia
+serves without it being any site's server name — falls back to **systemsite**: it gets the
+modified login page as soon as the module is enabled on systemsite and systemsite has SAML set up,
+and goes straight to SAML once it is in systemsite's list. Only systemsite's list may hold such
+hosts.
+
+The SAML valve finds a site from the request's host, which fails for such a host, so its SAML URLs
+name systemsite explicitly (`/home.connect.saml?siteKey=systemsite`, and a hidden `siteKey` field in
+the choice page's Google form). Systemsite's connector must name it too on the way back, and use
+the editing host for its URLs:
+
+```properties
+# karaf/etc/org.jahia.modules.auth-systemsite.cfg (or systemsite's Authentication settings)
+Saml.serverLocation = https://edit.example.com
+Saml.incomingTargetUrl = /home.callback.saml?siteKey=systemsite
+```
+
+The IdP must accept that callback URL for systemsite's relying party.
 
 ### Host List Format
 
@@ -61,8 +85,11 @@ is set up:
 | In the site's list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
 | Any other host of the site — including every host when the list is empty | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
 
-Everywhere else — module not enabled on the site, no SAML connector on it, or a host that resolves
-to no single site — the standard Jahia `/cms/login` page and logout are used.
+A host that no site declares follows the same table with systemsite's settings (see
+[Hosts no site declares](#hosts-no-site-declares-editing-host)).
+
+Everywhere else — module not enabled on the site, no SAML connector on it, or a host declared by
+several sites — the standard Jahia `/cms/login` page and logout are used.
 
 ## Permission
 
@@ -70,7 +97,8 @@ Access to a site's settings screen requires the `siteAdminSamlLoginProvider` per
 site**, checked on the site node (declared under Jahia's `site-admin` permission — see
 `src/main/import/permissions.xml`), so site administrators manage their own site. Because a site's
 list only applies to requests resolving to that site and only accepts that site's own names,
-holding the permission on one site gives no control over any other.
+holding the permission on one site gives no control over any other. The one exception is by
+design: systemsite's list also governs hosts that no site declares.
 
 ## GraphQL API
 
@@ -85,6 +113,7 @@ query {
     config(siteKey: "digitall") {
       fqdn
       serverNames
+      samlConfigured
     }
   }
 }
@@ -100,5 +129,7 @@ mutation {
 ```
 
 `siteKey` is required: it selects the site whose list is read or written, and the
-`siteAdminSamlLoginProvider` permission is checked on that site. `update` rejects any host that is
-not the site's server name or one of its aliases.
+`siteAdminSamlLoginProvider` permission is checked on that site. `samlConfigured` tells whether the
+site has an enabled SAML connector (without one the module leaves the site's login alone). `update`
+rejects any host that is not the site's server name or one of its aliases, and any host also
+declared by another site; for systemsite it also accepts hosts that no site declares.

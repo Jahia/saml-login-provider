@@ -20,6 +20,17 @@ export const DIGITALL = {
     spEntityId: 'jahia-digitall',
 }
 
+/**
+ * A host that NO site declares, standing for a production editing host (edit.<domain>): its login
+ * falls back to systemsite's settings. A network alias of the jahia service in docker-compose.yml.
+ */
+export const EDIT_HOST = {
+    siteKey: 'systemsite',
+    host: 'edit.jahia.test',
+    // Must match the clientId in saml-idp/realm/jahia-saml-realm.json.
+    spEntityId: 'jahia-systemsite',
+}
+
 /** The `idp` service of docker-compose.yml, as the cypress container and Jahia both reach it. */
 export const IDP = {
     url: 'http://idp.jahia.test:8180',
@@ -127,18 +138,51 @@ export function setSamlLoginProviderEnabled(siteKey: string, enabled: boolean): 
 export function setUpDigitallForSaml(): void {
     configureDigitallHostNames()
     setSamlLoginProviderEnabled(DIGITALL.siteKey, true)
+    configureSamlConnector(DIGITALL.siteKey, DIGITALL.spEntityId, `http://${DIGITALL.host}:8080`, '')
+}
 
+/**
+ * Make systemsite govern EDIT_HOST, the way a production editing host is set up: the SAML modules
+ * and this one enabled on systemsite, and a connector whose URLs are on that host. Since the valve
+ * cannot find a site from such a host, the connector's callback names systemsite -- the same
+ * setting production needs. Idempotent.
+ */
+export function setUpSystemsiteForSaml(): void {
+    cy.runProvisioningScript({
+        script: {
+            fileContent: ['jahia-authentication', 'jcr-auth-provider', 'saml-authentication-valve', MODULE_ID]
+                .map((module) => `- enable: "${module}"\n  site: "${EDIT_HOST.siteKey}"`)
+                .join('\n'),
+            type: 'application/yaml',
+        },
+    })
+    configureSamlConnector(
+        EDIT_HOST.siteKey,
+        EDIT_HOST.spEntityId,
+        `http://${EDIT_HOST.host}:8080`,
+        `?siteKey=${EDIT_HOST.siteKey}`,
+    )
+}
+
+/**
+ * Write a site's SAML connector, bound to the CI IdP, and wait until the valve serves it.
+ *
+ * @param siteUrl where the browser reaches the site; the connector's ACS URL is built on it
+ * @param siteQuery appended to the valve's endpoints: empty when the host is one of the site's
+ *        names (the valve finds the site from it), else `?siteKey=<site>`
+ */
+function configureSamlConnector(siteKey: string, spEntityId: string, siteUrl: string, siteQuery: string): void {
     requestUntil({ url: IDP.metadataUrl }, (r) => r.status === 200, IDP_STARTUP_POLL)
         .its('status')
         .should('eq', 200)
-    const siteUrl = `http://${DIGITALL.host}:8080`
     cy.executeGroovy('groovy/configureSamlConnector.groovy', {
-        '@@SITE@@': DIGITALL.siteKey,
-        '@@SP_ENTITY_ID@@': DIGITALL.spEntityId,
+        '@@SITE@@': siteKey,
+        '@@SP_ENTITY_ID@@': spEntityId,
         '@@SP_BASE_URL@@': siteUrl,
         // Jahia fetches this itself, over the stack network.
         '@@IDP_METADATA_URL@@': IDP.metadataUrl,
         '@@POST_LOGIN_PATH@@': '/home.html',
+        '@@INCOMING_TARGET_URL@@': `/home.callback.saml${siteQuery}`,
     })
 
     // Felix FileInstall picks the connector .cfg up asynchronously. Until it has, the valve answers
@@ -146,7 +190,7 @@ export function setUpDigitallForSaml(): void {
     // at the IdP.
     const connectorServes = (r: Cypress.Response<unknown>) =>
         r.status === 200 && typeof r.body === 'string' && r.body.includes('idp.jahia.test')
-    requestUntil({ url: `${siteUrl}${SAML_CONNECT_PATH}` }, connectorServes, CONNECTOR_POLL).then((r) => {
+    requestUntil({ url: `${siteUrl}${SAML_CONNECT_PATH}${siteQuery}` }, connectorServes, CONNECTOR_POLL).then((r) => {
         expect(connectorServes(r), `${SAML_CONNECT_PATH} serves the AuthnRequest form`).to.be.true
     })
 }
