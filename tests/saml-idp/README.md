@@ -25,7 +25,7 @@ cp .env.example .env                 # then edit the values
 
 `setup.sh` is idempotent. It deploys the modules, starts Keycloak, imports the realm, sets the test
 user's password, has Jahia write the connector config (with a freshly generated SP keystore), waits
-until the connector answers, and only then sets the saml-login-provider host list.
+until the connectors answer, and only then sets digitall's saml-login-provider host list.
 
 Configuration comes from `.env`, or from `SAML_IDP_ENV_FILE=/path/to/file`, or from variables
 already exported — whichever is present.
@@ -41,10 +41,10 @@ already exported — whichever is present.
 One SAML connector per site, each built from the host that resolves to that site, so the ACS URL
 Keycloak posts the assertion back to is always the host the visitor started on:
 
-| Host | Site | SP entity ID / Keycloak client | ACS | In the host list? |
+| Host | Site | SP entity ID / Keycloak client | ACS | In its site's host list? |
 |---|---|---|---|---|
 | **<http://digitall.localhost:8080>** | `digitall` | `jahia-digitall` | `http://digitall.localhost:8080/home.callback.saml` | yes: `/start` goes straight to Keycloak |
-| <http://localhost:8080> | `systemsite` | `jahia-systemsite` | `http://localhost:8080/home.callback.saml` | no: `/start` shows `/saml-login`, whose **Sign in with Google** goes to Keycloak |
+| <http://localhost:8080> | `systemsite` | `jahia-systemsite` | `http://localhost:8080/home.callback.saml` | systemsite has no list: stock Jahia login. The connector makes SAML work there as soon as systemsite is given one |
 
 The connectors are OSGi factory configs `org.jahia.modules.auth-<site>.cfg`. The realm declares a
 client per site, each admitting only its own host in `redirectUris`. Keycloak imports the realm only
@@ -72,12 +72,14 @@ lookupUser(saml.tester) -> /users/ie/ie/ha/saml.tester
 The equivalent by hand is Administration → **digitall** → Authentication → SAML → **JCR Auth
 provider** → map `username` to **Login username** (`ssoLoginId`, the only mandatory field) → Save.
 
-### saml-login-provider's host list (set automatically)
+### saml-login-provider's host list (set automatically, per site)
 
-`setup.sh` finishes by setting the host list to `SITE_HOST` through the module's GraphQL mutation —
-visible at `http://localhost:8080/jahia/administration/samlLoginProvider` (**Hosts**). It does so
+The list is per site. `setup.sh` finishes by setting **digitall's** list to `SITE_HOST` through the
+module's GraphQL mutation — visible in digitall's administration at
+`http://localhost:8080/jahia/administration/digitall/samlLoginProvider` (**Hosts**). It does so
 only after `/home.connect.saml` on `SITE_HOST` serves the auto-submit form to Keycloak: a host in
-that list without a working connector locks every unauthenticated visitor out.
+a list without a working connector locks every unauthenticated visitor out. A list only accepts the
+site's own names (server name and aliases), and systemsite is left without one.
 
 The module matches `request.getServerName()`, so the value must be the host you browse with. Open
 `http://digitall.localhost:8080/start` in a private window: you should be carried to Keycloak and
