@@ -1,4 +1,5 @@
 import React, {useEffect, useState} from 'react';
+import PropTypes from 'prop-types';
 import {useMutation, useQuery} from '@apollo/client';
 import {useTranslation} from 'react-i18next';
 import {Button, Field, Input} from '@jahia/moonstone';
@@ -13,16 +14,18 @@ const HOST_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Z
 const MAX_HOSTNAME_LENGTH = 253;
 const MAX_LABEL_LENGTH = 63;
 
-const isValidHostList = value => value
+const parseHosts = value => value
     .split(',')
-    .map(host => host.trim())
-    .filter(host => host !== '')
+    .map(host => host.trim().toLowerCase())
+    .filter(host => host !== '');
+
+const isValidHostList = value => parseHosts(value)
     .every(host =>
         host.length <= MAX_HOSTNAME_LENGTH &&
         HOST_PATTERN.test(host) &&
         host.split('.').every(label => label.length <= MAX_LABEL_LENGTH));
 
-export const SamlLoginProviderSettings = () => {
+export const SamlLoginProviderSettings = ({siteKey}) => {
     const {t} = useTranslation('saml-login-provider');
 
     const [fqdn, setFqdn] = useState('');
@@ -35,24 +38,27 @@ export const SamlLoginProviderSettings = () => {
     const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
     const [refetchFailed, setRefetchFailed] = useState(false);
 
-    // Update page title for the SPA route — this setting is server-wide, so there is
-    // no site to disambiguate between multiple open tabs.
+    // Update page title for the SPA route — the setting is per site, so the site tells
+    // multiple open tabs apart.
     useEffect(() => {
         const prev = document.title;
-        document.title = 'SAML auto-login — Jahia Administration';
+        document.title = `SAML auto-login — ${siteKey} — Jahia Administration`;
         return () => {
             document.title = prev;
         };
-    }, []);
+    }, [siteKey]);
 
     const {data: configData, loading: configLoading, error: configError, refetch: refetchConfig} = useQuery(
         GET_SAML_LOGIN_PROVIDER_CONFIG,
-        {fetchPolicy: 'network-only'}
+        {variables: {siteKey}, fetchPolicy: 'network-only'}
     );
 
     const [updateConfig, {loading: saving}] = useMutation(UPDATE_SAML_LOGIN_PROVIDER_CONFIG, {
-        refetchQueries: [{query: GET_SAML_LOGIN_PROVIDER_CONFIG}]
+        refetchQueries: [{query: GET_SAML_LOGIN_PROVIDER_CONFIG, variables: {siteKey}}]
     });
+
+    // The hosts this site answers on: the only values the server accepts in the list.
+    const serverNames = configData?.samlLoginProvider?.config?.serverNames || [];
 
     useEffect(() => {
         if (configData && configData.samlLoginProvider) {
@@ -78,11 +84,18 @@ export const SamlLoginProviderSettings = () => {
             return;
         }
 
+        // Mirrors the server-side check: only this site's own names can be routed here.
+        if (!parseHosts(fqdn).every(host => serverNames.includes(host))) {
+            setFqdnError(t('samlLoginProvider.errors.fqdn.notSiteHost', {serverNames: serverNames.join(', ')}));
+            document.getElementById('slp-fqdn')?.focus();
+            return;
+        }
+
         setFqdnError('');
         // 'saving' clears both live regions before the result lands, ensuring re-announcement on repeated saves
         setSaveStatus('saving');
         try {
-            const result = await updateConfig({variables: {fqdn}});
+            const result = await updateConfig({variables: {siteKey, fqdn}});
             if (result.data && result.data.samlLoginProvider) {
                 setFqdn(result.data.samlLoginProvider.update.fqdn || '');
                 setSaveStatus('success');
@@ -143,7 +156,7 @@ export const SamlLoginProviderSettings = () => {
                 </div>
 
                 <div className={styles.slp_scope_warning} role="note">
-                    <strong>{t('samlLoginProvider.scope')}</strong>
+                    <strong>{t('samlLoginProvider.scope', {siteKey})}</strong>
                 </div>
 
                 {refetchFailed && (
@@ -172,7 +185,7 @@ export const SamlLoginProviderSettings = () => {
                         <Input
                             id="slp-fqdn"
                             value={fqdn}
-                            placeholder="edit.jahia.com,editpp.jahia.com"
+                            placeholder={serverNames.join(',') || 'edit.jahia.com'}
                             aria-invalid={fqdnError ? 'true' : undefined}
                             aria-describedby={fqdnError ? 'slp-fqdn-error' : 'slp-fqdn-hint'}
                             autoComplete="off"
@@ -182,7 +195,9 @@ export const SamlLoginProviderSettings = () => {
                             }}
                         />
                         <span id="slp-fqdn-hint" className={styles.slp_hint}>
-                            {t('label.fqdn_hint')}
+                            {serverNames.length > 0 ?
+                                t('label.fqdn_hint', {serverNames: serverNames.join(', ')}) :
+                                t('label.fqdn_hint_no_server_names')}
                         </span>
                         {fqdnError && (
                             <span id="slp-fqdn-error" className={styles.slp_error_msg}>
@@ -211,6 +226,10 @@ export const SamlLoginProviderSettings = () => {
             </div>
         </div>
     );
+};
+
+SamlLoginProviderSettings.propTypes = {
+    siteKey: PropTypes.string.isRequired
 };
 
 export default SamlLoginProviderSettings;

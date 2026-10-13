@@ -1,46 +1,48 @@
 package org.jahia.community.modules.samlloginprovider.graphql;
 
+import org.jahia.community.modules.samlloginprovider.WebUtils;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
 
 import javax.jcr.RepositoryException;
 
 /**
- * Server-admin permission gate shared by the query and mutation extensions.
+ * Site-admin permission gate shared by the query and mutation.
  *
- * <p>The configuration this module exposes ({@code org.jahia.community.samlloginprovider},
- * the {@code fqdn} host list) is genuinely server-wide: it is stored via
- * {@code ConfigService}, not JCR, and is not scoped to any site (see
- * {@code ConfigStore} / {@code SamlLoginUrlProvider}). Gating it with a
- * per-site permission (e.g. checked on {@code /sites/{siteKey}}) would let an
- * admin who only holds site-admin rights on one low-value site rewrite SAML
- * auth behavior for the entire platform — a privilege escalation. The check
- * therefore runs on the JCR <em>root</em> node, mirroring how genuinely
- * server-wide Jahia permissions are checked elsewhere (e.g. {@code adminCache},
- * {@code adminTemplates}), and the permission itself is declared as a child of
- * the built-in {@code admin} ("server settings") permission node rather than
- * {@code site-admin} — see {@code permissions.xml}.
+ * <p>The configuration is per site ({@code SiteHostsStore}) and only ever applies to requests
+ * resolving to that site ({@code SamlLoginUrlProvider}), so a per-site permission checked on that
+ * site's node is the right scope: holding it on one site gives no power over any other. (A previous
+ * version gated a single server-wide list with this kind of per-site check, which let any site's
+ * admin rewrite login behavior for the whole platform; storage being per site is what makes the
+ * per-site check sound now.) The permission is declared under {@code site-admin} -- see
+ * {@code permissions.xml}.
  *
- * <p>The check runs on the caller's session (not a system session), and
- * failures are raised as unchecked exceptions so the GraphQL layer reports a
- * real error to the caller instead of an ambiguous {@code null}: a denied
- * request must be distinguishable from an empty configuration.
+ * <p>The check runs on the caller's session (not a system session). A site that does not exist or
+ * that the caller cannot read gets the same answer as a missing permission, so the API cannot be
+ * used to enumerate sites. Failures are unchecked exceptions, so GraphQL reports a real error
+ * rather than an ambiguous {@code null}: a denied request must be distinguishable from an empty
+ * configuration.
  */
 final class SamlLoginProviderPermissions {
 
-    static final String PERMISSION = "samlLoginProviderAdmin";
+    static final String PERMISSION = "siteAdminSamlLoginProvider";
 
     private SamlLoginProviderPermissions() {
     }
 
-    static void checkServerAdmin() {
+    static void checkSiteAdmin(String siteKey) {
+        // Validated before it is used in a JCR path (and, downstream, in a file name).
+        if (!WebUtils.isValidSiteKey(siteKey)) {
+            throw new IllegalArgumentException("Invalid site key");
+        }
+        String sitePath = "/sites/" + siteKey;
         try {
             JCRSessionWrapper callerSession = JCRSessionFactory.getInstance().getCurrentUserSession();
-            if (!callerSession.getNode("/").hasPermission(PERMISSION)) {
+            if (!callerSession.nodeExists(sitePath) || !callerSession.getNode(sitePath).hasPermission(PERMISSION)) {
                 throw new SecurityException("Access denied: " + PERMISSION);
             }
         } catch (RepositoryException e) {
-            throw new IllegalStateException("Server-level permission check failed", e);
+            throw new IllegalStateException("Site-level permission check failed", e);
         }
     }
 }

@@ -23,6 +23,9 @@ services:
                 # POST back to Jahia same-site, so the session cookie is sent with it.
                 aliases:
                     - digitall.jahia.test
+                    # A second name of digitall (a j:serverNameAliases entry set by the specs): the
+                    # per-site host list routes a site's unlisted names to the choice page.
+                    - www.digitall.jahia.test
     # SAML IdP for spec 03 (full auto-login round trip). CI-only and NOT published on any host
     # port: only Jahia and the cypress container talk to it, over the stack network. The manual
     # fixture in saml-idp/ is a separate Keycloak on 127.0.0.1:8180 for a browser on the host; the

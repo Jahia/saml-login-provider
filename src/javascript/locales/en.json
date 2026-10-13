@@ -2,19 +2,20 @@
   "label": {
     "menu_entry": "SAML auto-login",
     "fqdn": "Hosts (comma-separated FQDNs)",
-    "fqdn_hint": "Example: edit.jahia.com,editpp.jahia.com — leave empty to disable the automatic redirect.",
+    "fqdn_hint": "This site's hosts: {{serverNames}}. List those that should go straight to SAML login, or leave empty to turn it off for this site.",
     "update": "Save",
     "cancel": "Cancel",
     "saving": "Saving…",
     "loading": "Loading…",
-    "retry": "Retry"
+    "retry": "Retry",
+    "fqdn_hint_no_server_names": "Leave empty to turn the automatic SAML login off for this site."
   },
   "samlLoginProvider": {
-    "description": "On the hosts listed below, unauthenticated visitors are redirected to the SAML connect endpoint (/home.connect.saml) instead of the Jahia login page, and the logout button lands on a public page.",
+    "description": "On the hosts of this site listed below, unauthenticated visitors are redirected to the SAML connect endpoint (/home.connect.saml) instead of the Jahia login page, and the logout button lands on a public page. On this site's other hosts, they get a login page offering both the credentials form and SAML sign-in.",
     "disabled": {
-      "hint": "When the list is empty the module is inactive: the standard Jahia login page is used on every host."
+      "hint": "When the list is empty the module is inactive on this site: the standard Jahia login page is used."
     },
-    "scope": "Important: this setting is server-wide, it is shared by all sites.",
+    "scope": "This setting applies to the site {{siteKey}} only. Each site has its own list.",
     "cancel": "Changes discarded.",
     "success": {
       "update": "SAML auto-login configuration saved successfully."
@@ -30,7 +31,8 @@
         "failed": "Your changes were saved, but the display could not be refreshed automatically. Reload the page to confirm the current configuration."
       },
       "fqdn": {
-        "invalid": "Enter a comma-separated list of valid hostnames (e.g. editpp.jahia.com), or leave the field empty."
+        "invalid": "Enter a comma-separated list of valid hostnames (e.g. editpp.jahia.com), or leave the field empty.",
+        "notSiteHost": "Each host must be one of this site's hosts: {{serverNames}}."
       }
     }
   }

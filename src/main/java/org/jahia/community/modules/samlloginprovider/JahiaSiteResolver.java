@@ -1,0 +1,140 @@
+package org.jahia.community.modules.samlloginprovider;
+
+import org.jahia.services.content.decorator.JCRSiteNode;
+import org.jahia.services.sites.JahiaSitesService;
+import org.osgi.service.component.annotations.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.jcr.RepositoryException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.LongSupplier;
+import java.util.function.Supplier;
+
+/**
+ * {@link SiteResolver} built from every site's server name and aliases, read through
+ * {@link JahiaSitesService}.
+ *
+ * <p>For a host declared by exactly one site this agrees with the lookup the SAML connect endpoint
+ * uses to pick its connector ({@code getSitenameByServerName}, case-insensitive, no default-site
+ * fallback). A host declared by several sites resolves to no site, so it keeps the stock login.
+ *
+ * <p>The routing index is cached for {@value #ROUTING_CACHE_TTL_MS} ms: it sits on the login path
+ * of every anonymous request. A server name change therefore reaches routing within that delay.
+ * Validation ({@link #sitesClaiming}, {@link #serverNamesOf}) always reads fresh data.
+ */
+@Component(service = SiteResolver.class, immediate = true)
+public class JahiaSiteResolver implements SiteResolver {
+
+    static final long ROUTING_CACHE_TTL_MS = 5_000;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(JahiaSiteResolver.class);
+
+    /** Lower-cased host -> keys of the sites declaring it. Immutable, swapped wholesale. */
+    private static final class Snapshot {
+        private final long readAt;
+        private final Map<String, Set<String>> sitesByHost;
+
+        private Snapshot(long readAt, Map<String, Set<String>> sitesByHost) {
+            this.readAt = readAt;
+            this.sitesByHost = sitesByHost;
+        }
+    }
+
+    private final Supplier<Map<String, Set<String>>> serverNamesBySite;
+    private final LongSupplier clock;
+    private volatile Snapshot routingIndex;
+
+    public JahiaSiteResolver() {
+        this(JahiaSiteResolver::readServerNamesBySite, System::currentTimeMillis);
+    }
+
+    /** @param serverNamesBySite site key -> its server name and aliases, read from the platform */
+    JahiaSiteResolver(Supplier<Map<String, Set<String>>> serverNamesBySite, LongSupplier clock) {
+        this.serverNamesBySite = serverNamesBySite;
+        this.clock = clock;
+    }
+
+    @Override
+    public String siteKeyFor(String serverName) {
+        if (serverName == null) {
+            return null;
+        }
+        Set<String> claimants = routingIndex().getOrDefault(lower(serverName), Set.of());
+        return claimants.size() == 1 ? claimants.iterator().next() : null;
+    }
+
+    @Override
+    public Set<String> sitesClaiming(String serverName) {
+        if (serverName == null) {
+            return Set.of();
+        }
+        return indexByHost(safeRead()).getOrDefault(lower(serverName), Set.of());
+    }
+
+    @Override
+    public Set<String> serverNamesOf(String siteKey) {
+        return safeRead().getOrDefault(siteKey, Set.of());
+    }
+
+    private Map<String, Set<String>> routingIndex() {
+        long now = clock.getAsLong();
+        Snapshot current = routingIndex;
+        if (current == null || now - current.readAt > ROUTING_CACHE_TTL_MS) {
+            current = new Snapshot(now, indexByHost(safeRead()));
+            routingIndex = current;
+        }
+        return current.sitesByHost;
+    }
+
+    /** A read failure means "no site": the caller then leaves the login flow alone. */
+    private Map<String, Set<String>> safeRead() {
+        try {
+            return serverNamesBySite.get();
+        } catch (RuntimeException e) {
+            LOGGER.warn("Could not read the sites' server names; treating every host as unresolved", e);
+            return Map.of();
+        }
+    }
+
+    private static Map<String, Set<String>> indexByHost(Map<String, Set<String>> serverNamesBySite) {
+        Map<String, Set<String>> sitesByHost = new HashMap<>();
+        serverNamesBySite.forEach((siteKey, names) -> names.forEach(name ->
+                sitesByHost.computeIfAbsent(lower(name), host -> new HashSet<>()).add(siteKey)));
+        Map<String, Set<String>> immutable = new HashMap<>();
+        sitesByHost.forEach((host, sites) -> immutable.put(host, Set.copyOf(sites)));
+        return Map.copyOf(immutable);
+    }
+
+    private static Map<String, Set<String>> readServerNamesBySite() {
+        List<JCRSiteNode> sites;
+        try {
+            sites = JahiaSitesService.getInstance().getSitesNodeList();
+        } catch (RepositoryException e) {
+            throw new IllegalStateException("Could not list the sites", e);
+        }
+        Map<String, Set<String>> namesBySite = new HashMap<>();
+        for (JCRSiteNode site : sites) {
+            List<String> names = new ArrayList<>();
+            names.add(site.getServerName());
+            if (site.getServerNameAliases() != null) {
+                names.addAll(site.getServerNameAliases());
+            }
+            Set<String> lowerCased = new HashSet<>();
+            names.stream().filter(Objects::nonNull).map(JahiaSiteResolver::lower).forEach(lowerCased::add);
+            namesBySite.put(site.getSiteKey(), Set.copyOf(lowerCased));
+        }
+        return Map.copyOf(namesBySite);
+    }
+
+    private static String lower(String value) {
+        return value.toLowerCase(Locale.ROOT);
+    }
+}

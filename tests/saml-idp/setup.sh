@@ -68,10 +68,13 @@ KC_URL=http://localhost:8180
 # built from that same host -- so each visitor returns to the host they started on.
 #
 #   SITE_KEY=SITE_HOST   the content site: given its own server name (above), and the host that goes
-#                        into saml-login-provider's host list, i.e. redirected to SAML outright.
-#   systemsite=localhost systemsite keeps its stock server name. localhost is NOT in the host list,
-#                        so it shows /saml-login -- whose "Sign in with Google" button posts to
-#                        /home.connect.saml on localhost, and needs this connector to work.
+#                        into that site's saml-login-provider host list, i.e. redirected to SAML
+#                        outright.
+#   systemsite=localhost systemsite keeps its stock server name and gets NO host list: the list is
+#                        per site, so an unconfigured systemsite keeps Jahia's stock login on
+#                        localhost. The connector is there so that SAML works on localhost the moment
+#                        systemsite is given a list (Administration -> systemsite -> SAML auto-login),
+#                        and for /home.connect.saml requested directly.
 #
 # The SP entity ID is jahia-<siteKey>; realm/jahia-saml-realm.json declares one client per site.
 SYSTEMSITE_HOST=localhost
@@ -306,7 +309,7 @@ done
 # Through a login session plus a same-host Origin header, not basic auth: Jahia's API security
 # filter only lets a hosted-origin session reach GraphQL, and answers anything else with a 200
 # "Permission denied" body.
-log "Setting the saml-login-provider host list to $SITE_HOST"
+log "Setting the saml-login-provider host list of site $SITE_KEY to $SITE_HOST"
 COOKIES=$(mktemp)
 trap 'rm -f "$COOKIES"' EXIT
 LOGIN_RESULT=$(printf '%s' "$SUPER_USER_PASSWORD" | curl -s -c "$COOKIES" \
@@ -318,14 +321,14 @@ if [[ $LOGIN_RESULT != OK ]]; then
 fi
 FQDN_RESULT=$(curl -sf -b "$COOKIES" \
     -H 'Content-Type: application/json' -H "Origin: $JAHIA_LOCAL_URL" \
-    -d "{\"query\":\"mutation { samlLoginProvider { update(fqdn: \\\"$SITE_HOST\\\") { fqdn } } }\"}" \
+    -d "{\"query\":\"mutation { samlLoginProvider { update(siteKey: \\\"$SITE_KEY\\\", fqdn: \\\"$SITE_HOST\\\") { fqdn } } }\"}" \
     "$JAHIA_LOCAL_URL/modules/graphql")
 curl -s -o /dev/null -b "$COOKIES" -X POST "$JAHIA_LOCAL_URL/cms/logout"
 if ! grep -q "\"fqdn\":\"$SITE_HOST\"" <<<"$FQDN_RESULT"; then
     echo "ERROR: could not set the host list: $FQDN_RESULT" >&2
     exit 1
 fi
-echo "   host list: $SITE_HOST"
+echo "   host list of $SITE_KEY: $SITE_HOST"
 
 cat <<EOF
 
@@ -340,11 +343,12 @@ for entry in "${SAML_SITES[@]}"; do
     printf '   %-16s %s\n' "Site $site" "$host -> SP jahia-$site, ACS $(site_url "$host")/home.callback.saml"
 done
 cat <<EOF
-   Host list        $SITE_HOST  ($JAHIA_LOCAL_URL/jahia/administration/samlLoginProvider)
+   Host list        site $SITE_KEY: $SITE_HOST  ($JAHIA_LOCAL_URL/jahia/administration/$SITE_KEY/samlLoginProvider)
+                    other sites: none, so their login is untouched
 
    Try it, each in a private window, as $SAML_TEST_USER:
      $(site_url "$SITE_HOST")/start   -> straight to Keycloak, back logged in ($SITE_HOST is in the list)
-     $(site_url "$SYSTEMSITE_HOST")/start   -> /saml-login; "Sign in with Google" -> Keycloak -> back
+     $(site_url "$SYSTEMSITE_HOST")/start   -> stock Jahia login (systemsite has no host list)
 
 == If you lock yourself out (host configured but SAML broken):
 

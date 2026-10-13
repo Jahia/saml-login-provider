@@ -1,7 +1,9 @@
-query GetSamlLoginProviderConfig {
+query GetSamlLoginProviderConfig($siteKey: String!) {
     samlLoginProvider {
-        config {
+        config(siteKey: $siteKey) {
+            siteKey
             fqdn
+            serverNames
         }
     }
 }

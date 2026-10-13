@@ -1,28 +1,34 @@
-import { locationOf, requestUntil, setSamlLoginProviderHosts } from '../utils/samlLoginProvider'
+import { configureDigitallHostNames, DIGITALL, locationOf, requestUntil, setSamlLoginProviderHosts } from '../utils/samlLoginProvider'
 
 describe('SAML Login redirect behavior', () => {
-    // Requests issued by cy.request()/cy.visit() inside the docker network hit
-    // Jahia with a Host header equal to JAHIA_HOST (default "jahia"), which is
-    // what SamlLoginUrlProvider matches against request.getServerName().
-    const configuredHost = 'jahia'
-    const nonConfiguredHost = 'not-configured.example.com'
+    // The host list is per site and a request is routed by the site its host resolves to.
+    // digitall answers on DIGITALL.host and DIGITALL.alias (network aliases of the jahia service);
+    // the baseUrl host "jahia" resolves to no site at all.
+    const urlOn = (host: string) => `http://${host}:8080`
     const protectedPath = '/jahia/administration'
     const choiceLoginPath = '/saml-login'
     const samlConnectPath = '/home.connect.saml'
 
-    afterEach(() => {
-        // The configuration is server-wide: always leave a clean baseline
-        // behind for other specs.
-        setSamlLoginProviderHosts(null)
+    before(() => {
+        configureDigitallHostNames()
     })
 
-    it('redirects an unauthenticated request straight to the SAML connect endpoint on a configured host', () => {
-        setSamlLoginProviderHosts(configuredHost)
+    beforeEach(() => {
+        // Only DIGITALL.host is listed; the alias is another name of the same, configured site.
+        setSamlLoginProviderHosts(DIGITALL.siteKey, DIGITALL.host)
         cy.clearCookies()
+    })
 
+    afterEach(() => {
+        // Leave the site unconfigured for other specs.
+        setSamlLoginProviderHosts(DIGITALL.siteKey, null)
+    })
+
+    it('redirects an unauthenticated request straight to the SAML connect endpoint on a listed host', () => {
         // The new host list reaches the provider asynchronously: poll for its effect rather than
         // racing it (see requestUntil).
-        requestUntil({ url: protectedPath }, (r) => locationOf(r).includes(samlConnectPath)).then((response) => {
+        const url = `${urlOn(DIGITALL.host)}${protectedPath}`
+        requestUntil({ url }, (r) => locationOf(r).includes(samlConnectPath)).then((response) => {
             expect(response.status, 'unauthenticated request should be redirected').to.be.oneOf([
                 301, 302, 303, 307, 401,
             ])
@@ -30,15 +36,26 @@ describe('SAML Login redirect behavior', () => {
         })
     })
 
-    it('sends an unauthenticated request to the choice login page on a non-configured host', () => {
-        setSamlLoginProviderHosts(nonConfiguredHost)
-        cy.clearCookies()
-
-        requestUntil({ url: protectedPath }, (r) => locationOf(r).includes(choiceLoginPath)).then((response) => {
+    it('sends an unauthenticated request to the choice login page on an unlisted host of the same site', () => {
+        const url = `${urlOn(DIGITALL.alias)}${protectedPath}`
+        requestUntil({ url }, (r) => locationOf(r).includes(choiceLoginPath)).then((response) => {
             expect(response.status, 'unauthenticated request should be redirected').to.be.oneOf([
                 301, 302, 303, 307, 401,
             ])
             expect(locationOf(response)).to.include(choiceLoginPath)
+        })
+    })
+
+    it('leaves the stock login alone on a host whose site is not configured', () => {
+        // First make sure digitall's list is in effect, so the check below is not just early.
+        requestUntil({ url: `${urlOn(DIGITALL.host)}${protectedPath}` }, (r) =>
+            locationOf(r).includes(samlConnectPath),
+        )
+
+        // "jahia" resolves to no site, so no list applies to it: Jahia's own login flow.
+        cy.request({ url: protectedPath, followRedirect: false, failOnStatusCode: false }).then((response) => {
+            expect(locationOf(response), 'no SAML redirect').to.not.include(samlConnectPath)
+            expect(locationOf(response), 'no choice page').to.not.include(choiceLoginPath)
         })
     })
 

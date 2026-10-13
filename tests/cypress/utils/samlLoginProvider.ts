@@ -1,10 +1,22 @@
 /// <reference types="cypress" />
 
-// Helpers shared by the specs that change saml-login-provider's server-wide host list and then
+// Helpers shared by the specs that change a site's saml-login-provider host list and then
 // observe its effect over HTTP.
 
 const UPDATE_HOSTS_MUTATION =
-    'mutation UpdateHosts($fqdn: String) { samlLoginProvider { update(fqdn: $fqdn) { fqdn } } }'
+    'mutation UpdateHosts($siteKey: String!, $fqdn: String) ' +
+    '{ samlLoginProvider { update(siteKey: $siteKey, fqdn: $fqdn) { fqdn } } }'
+
+/**
+ * The site the specs configure and the names it answers on. Both are network aliases of the
+ * jahia service in docker-compose.yml, so the cypress container resolves them; the host list only
+ * accepts a site's own names, and the choice-page rule needs a site with two.
+ */
+export const DIGITALL = {
+    siteKey: 'digitall',
+    host: 'digitall.jahia.test',
+    alias: 'www.digitall.jahia.test',
+}
 
 const DEFAULT_POLL_ATTEMPTS = 20
 const DEFAULT_POLL_INTERVAL_MS = 500
@@ -29,19 +41,29 @@ export function locationOf(response: Cypress.Response<unknown>): string {
  * left unchanged. cy.request is origin-independent, and the same-host Origin header is what the
  * security filter requires before it lets a session cookie reach GraphQL at all.
  */
-export function setSamlLoginProviderHosts(fqdn: string | null): void {
+export function setSamlLoginProviderHosts(siteKey: string, fqdn: string | null): void {
     const baseUrl = Cypress.config('baseUrl')
     cy.login()
     cy.request({
         method: 'POST',
         url: `${baseUrl}/modules/graphql`,
         headers: { Origin: baseUrl },
-        body: { query: UPDATE_HOSTS_MUTATION, variables: { fqdn } },
+        body: { query: UPDATE_HOSTS_MUTATION, variables: { siteKey, fqdn } },
     }).then((response) => {
-        expect(response.body.errors, `errors setting the host list to ${fqdn}`).to.be.undefined
+        expect(response.body.errors, `errors setting the host list of ${siteKey} to ${fqdn}`).to.be.undefined
         expect(response.body.data.samlLoginProvider.update.fqdn, 'host list').to.eq(fqdn ?? '')
     })
     cy.logout()
+}
+
+/**
+ * Give digitall its own server name and an alias. Digitall ships with the same j:serverName as
+ * systemsite (localhost), so until then no host resolves to it -- see configureSiteHost.groovy.
+ * Idempotent.
+ */
+export function configureDigitallHostNames(): void {
+    cy.executeGroovy('groovy/configureSiteHost.groovy', { '@@HOST@@': DIGITALL.host, '@@SITE@@': DIGITALL.siteKey })
+    cy.executeGroovy('groovy/addSiteAlias.groovy', { '@@ALIAS@@': DIGITALL.alias, '@@SITE@@': DIGITALL.siteKey })
 }
 
 /**
