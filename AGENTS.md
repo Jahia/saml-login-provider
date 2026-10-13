@@ -85,8 +85,10 @@ yarn install
 - Run `mvn clean install` first: `ci.build.sh` copies `../target/*-SNAPSHOT.jar` into the image
 - Results: `docker cp "cypress:/home/jahians/results" .` (from `tests/`; git-ignored)
 - Jahia is published on `127.0.0.1` only (HTTP 8080, JDWP 8000 with JPDA on); Cypress reaches it over the compose network
-- Manual end-to-end login from a browser on your machine (separate Keycloak on `127.0.0.1:8180`,
-  `digitall.localhost`): see `tests/saml-idp/README.md`. It shares the realm file and the Groovy
+- Manual end-to-end login from a browser on your machine (separate Keycloak on `127.0.0.1:8180`):
+  see `tests/saml-idp/README.md`. It puts a SAML connector on both `digitall` (`digitall.localhost`,
+  in the host list) and `systemsite` (`localhost`, reached through `/saml-login`), each with its
+  own host in its SP URL and its own Keycloak client. It shares the realm file and the Groovy
   scripts in `tests/cypress/fixtures/groovy/` with spec 03
 
 ## Gotchas

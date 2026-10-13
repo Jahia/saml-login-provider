@@ -57,13 +57,26 @@ fi
 : "${POST_LOGIN_PATH:=/home.html}"
 : "${SUPER_USER_PASSWORD:=root1234}"
 : "${JAHIA_ADMIN_USER:=root}"
-# The SP base URL. Must use SITE_HOST, because that is the host that resolves to SITE_KEY.
-: "${JAHIA_PUBLIC_URL:=http://$SITE_HOST:8080}"
+: "${JAHIA_PORT:=8080}"
 # Jahia answers on localhost regardless; used for health checks and the provisioning API.
-JAHIA_LOCAL_URL=http://localhost:8080
+JAHIA_LOCAL_URL=http://localhost:$JAHIA_PORT
 REALM=jahia-saml
-SP_ENTITY_ID=jahia-digitall
 KC_URL=http://localhost:8180
+
+# Every site that gets a SAML connector, as siteKey=host. The connector is reached at whatever host
+# resolves to its site, and its SP URL (hence the ACS URL Keycloak posts the assertion back to) is
+# built from that same host -- so each visitor returns to the host they started on.
+#
+#   SITE_KEY=SITE_HOST   the content site: given its own server name (above), and the host that goes
+#                        into saml-login-provider's host list, i.e. redirected to SAML outright.
+#   systemsite=localhost systemsite keeps its stock server name. localhost is NOT in the host list,
+#                        so it shows /saml-login -- whose "Sign in with Google" button posts to
+#                        /home.connect.saml on localhost, and needs this connector to work.
+#
+# The SP entity ID is jahia-<siteKey>; realm/jahia-saml-realm.json declares one client per site.
+SYSTEMSITE_HOST=localhost
+SAML_SITES=("$SITE_KEY=$SITE_HOST" "systemsite=$SYSTEMSITE_HOST")
+site_url() { echo "http://$1:$JAHIA_PORT"; }
 # Where JAHIA fetches the IdP metadata: the Keycloak container over tests_stack. The metadata
 # itself still advertises KC_URL, which is what the browser on this machine follows.
 KC_INTERNAL_URL=http://slp-saml-idp-keycloak:8180
@@ -172,18 +185,19 @@ done
 #
 # saml-login-provider itself is deliberately NOT enabled here: it is a server-level module whose
 # admin route lives under Server settings and whose permission is checked on the JCR root node.
-log "Enabling the authentication modules on site $SITE_KEY"
-cat > .enable.run.json <<EOF
-[
-  {"enable":"jahia-authentication","site":"$SITE_KEY"},
-  {"enable":"jcr-auth-provider","site":"$SITE_KEY"},
-  {"enable":"saml-authentication-valve","site":"$SITE_KEY"}
-]
-EOF
+ENABLE_OPS=()
+for entry in "${SAML_SITES[@]}"; do
+    site=${entry%%=*}
+    log "Enabling the authentication modules on site $site"
+    for module in jahia-authentication jcr-auth-provider saml-authentication-valve; do
+        ENABLE_OPS+=("{\"enable\":\"$module\",\"site\":\"$site\"}")
+    done
+done
+(IFS=,; echo "[${ENABLE_OPS[*]}]") > .enable.run.json
 curl -sf -u "$JAHIA_ADMIN_USER:$SUPER_USER_PASSWORD" \
     -F script=@.enable.run.json "$JAHIA_LOCAL_URL/modules/api/provisioning" -o /dev/null
 rm -f .enable.run.json
-echo "   enabled on $SITE_KEY"
+echo "   enabled on ${SAML_SITES[*]%%=*}"
 
 # ---------------------------------------------------------------- 1b. site hostname
 # Without this the connector below is bound to a site no request can resolve to. See the long
@@ -218,51 +232,74 @@ if [[ -z $KC_READY ]]; then
 fi
 
 log "Setting the test user's password"
-docker exec slp-saml-idp-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
-    --server "$KC_URL" --realm master \
+kcadm() { docker exec slp-saml-idp-keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
+kcadm config credentials --server "$KC_URL" --realm master \
     --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
-docker exec slp-saml-idp-keycloak /opt/keycloak/bin/kcadm.sh set-password \
-    -r "$REALM" --username "$SAML_TEST_USER" --new-password "$SAML_TEST_USER_PASSWORD" >/dev/null
+kcadm set-password -r "$REALM" --username "$SAML_TEST_USER" --new-password "$SAML_TEST_USER_PASSWORD" >/dev/null
 echo "   $SAML_TEST_USER is ready"
+
+# Keycloak imports the realm file only into an EMPTY realm (--import-realm skips one that exists),
+# so a Keycloak created before a client was added to realm/jahia-saml-realm.json lacks it, and
+# every login through that site's connector would fail at the IdP with "Invalid request".
+log "Checking that the realm declares one SP client per site"
+for entry in "${SAML_SITES[@]}"; do
+    client="jahia-${entry%%=*}"
+    if ! kcadm get clients -r "$REALM" -q "clientId=$client" --fields clientId 2>/dev/null | grep -F "\"$client\"" > /dev/null; then
+        echo "ERROR: Keycloak has no client $client -- it predates the current realm file." >&2
+        echo "       Re-import the realm (it holds nothing else; this script resets the user):" >&2
+        echo "         docker compose up -d --force-recreate && ./setup.sh" >&2
+        exit 1
+    fi
+    echo "   $client"
+done
 
 # ---------------------------------------------------------------- 3. connector config
 # configureSamlConnector.groovy runs INSIDE Jahia: it fetches the IdP metadata over tests_stack,
 # generates a fresh SP keystore with Jahia's own keytool (random passphrases, never leaving the
-# container), wires the user mapper, and writes org.jahia.modules.auth-$SITE_KEY.cfg atomically.
+# container), wires the user mapper, and writes org.jahia.modules.auth-<site>.cfg atomically.
 # See its header for why the keystore must be supplied and how the mapper value is escaped.
-log "Writing the SAML connector configuration for $SITE_KEY"
-run_groovy configureSamlConnector.groovy /tmp/slp-saml-connector.txt \
-    SITE="$SITE_KEY" \
-    SP_ENTITY_ID="$SP_ENTITY_ID" \
-    SP_BASE_URL="$JAHIA_PUBLIC_URL" \
-    IDP_METADATA_URL="$KC_INTERNAL_URL/realms/$REALM/protocol/saml/descriptor" \
-    POST_LOGIN_PATH="$POST_LOGIN_PATH"
-
-# Felix FileInstall picks the .cfg up asynchronously. The valve answers 400 for SITE_HOST until it
-# has, then serves the HTTP-POST auto-submit form aimed at the IdP. --resolve pins SITE_HOST to
-# loopback for curl builds that do not map *.localhost themselves.
-log "Waiting for the connector to serve $SITE_HOST (up to 60s)"
-CONNECTOR_READY=
-for _ in $(seq 1 20); do
-    # The valve HTML-escapes the form action (http&#x3a;&#x2f;&#x2f;...): decode before matching. The
-    # IdP URL is checked, not just the form, because while Felix reloads the .cfg a previous
-    # connector (e.g. the CI one) still answers with a form aimed at another IdP.
-    # Not grep -q: under pipefail its early exit SIGPIPEs sed/curl and turns a match into a failure.
-    if curl -s --resolve "$SITE_HOST:8080:127.0.0.1" "$JAHIA_PUBLIC_URL/home.connect.saml" \
-            | sed -e 's/&#x3a;/:/g' -e 's|&#x2f;|/|g' | grep -F "$KC_URL/realms/$REALM/" > /dev/null; then
-        CONNECTOR_READY=1
-        echo "   /home.connect.saml on $SITE_HOST posts to the IdP"
-        break
-    fi
-    sleep 3
+for entry in "${SAML_SITES[@]}"; do
+    site=${entry%%=*} host=${entry#*=}
+    log "Writing the SAML connector configuration for $site ($(site_url "$host"))"
+    run_groovy configureSamlConnector.groovy /tmp/slp-saml-connector.txt \
+        SITE="$site" \
+        SP_ENTITY_ID="jahia-$site" \
+        SP_BASE_URL="$(site_url "$host")" \
+        IDP_METADATA_URL="$KC_INTERNAL_URL/realms/$REALM/protocol/saml/descriptor" \
+        POST_LOGIN_PATH="$POST_LOGIN_PATH"
 done
-if [[ -z $CONNECTOR_READY ]]; then
-    echo "ERROR: the connector never came up on $SITE_HOST; NOT enabling the redirect." >&2
-    exit 1
-fi
+
+# Felix FileInstall picks each .cfg up asynchronously. The valve answers 400 for a host until it
+# has, then serves the HTTP-POST auto-submit form aimed at the IdP. --resolve pins the host to
+# loopback for curl builds that do not map *.localhost themselves.
+wait_for_connector() {
+    local host=$1 _
+    for _ in $(seq 1 20); do
+        # The valve HTML-escapes the form action (http&#x3a;&#x2f;&#x2f;...): decode before matching.
+        # The IdP URL is checked, not just the form, because while Felix reloads the .cfg a
+        # previous connector (e.g. the CI one) still answers with a form aimed at another IdP.
+        # Not grep -q: under pipefail its early exit SIGPIPEs sed/curl and turns a match into a
+        # failure.
+        if curl -s --resolve "$host:$JAHIA_PORT:127.0.0.1" "$(site_url "$host")/home.connect.saml" \
+                | sed -e 's/&#x3a;/:/g' -e 's|&#x2f;|/|g' | grep -F "$KC_URL/realms/$REALM/" > /dev/null; then
+            echo "   /home.connect.saml on $host posts to the IdP"
+            return 0
+        fi
+        sleep 3
+    done
+    return 1
+}
+for entry in "${SAML_SITES[@]}"; do
+    host=${entry#*=}
+    log "Waiting for the connector to serve $host (up to 60s)"
+    if ! wait_for_connector "$host"; then
+        echo "ERROR: the connector never came up on $host; NOT enabling the redirect." >&2
+        exit 1
+    fi
+done
 
 # ---------------------------------------------------------------- 4. saml-login-provider
-# Only now that the connector answers: a host in this list without a working connector locks
+# Only now that the connectors answer: a host in this list without a working connector locks
 # every unauthenticated visitor out (see AGENTS.md, Gotchas). The module matches
 # request.getServerName(), so this must be the host you browse with.
 #
@@ -297,14 +334,17 @@ cat <<EOF
    Keycloak IdP     $KC_URL/admin   ($KEYCLOAK_ADMIN)
    Realm            $REALM
    SAML end user    $SAML_TEST_USER
-   Jahia SP         $SP_ENTITY_ID  ->  $JAHIA_PUBLIC_URL/home.callback.saml
-   Connector        site '$SITE_KEY', org.jahia.modules.auth-$SITE_KEY.cfg, user mapper included
-   Site host        $SITE_HOST resolves to $SITE_KEY (localhost still resolves to systemsite)
-   Host list        $SITE_HOST  ($JAHIA_PUBLIC_URL/jahia/administration/samlLoginProvider)
+EOF
+for entry in "${SAML_SITES[@]}"; do
+    site=${entry%%=*} host=${entry#*=}
+    printf '   %-16s %s\n' "Site $site" "$host -> SP jahia-$site, ACS $(site_url "$host")/home.callback.saml"
+done
+cat <<EOF
+   Host list        $SITE_HOST  ($JAHIA_LOCAL_URL/jahia/administration/samlLoginProvider)
 
-   Try it: open $JAHIA_PUBLIC_URL/start in a private window. You should land on Keycloak, and
-   come back logged in as $SAML_TEST_USER. Browse at $SITE_HOST -- NOT http://localhost:8080,
-   which resolves to systemsite and has no SAML connector.
+   Try it, each in a private window, as $SAML_TEST_USER:
+     $(site_url "$SITE_HOST")/start   -> straight to Keycloak, back logged in ($SITE_HOST is in the list)
+     $(site_url "$SYSTEMSITE_HOST")/start   -> /saml-login; "Sign in with Google" -> Keycloak -> back
 
 == If you lock yourself out (host configured but SAML broken):
 

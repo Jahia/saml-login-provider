@@ -37,13 +37,23 @@ already exported — whichever is present.
 | Keycloak admin | <http://localhost:8180/admin> |
 | Realm | `jahia-saml` |
 | SAML end user | `saml.tester` |
-| **Browse the SP at** | **<http://digitall.localhost:8080>** — this is what resolves to `digitall` |
-| Jahia SP entity ID | `jahia-digitall` |
-| ACS | `http://digitall.localhost:8080/home.callback.saml` |
-| Connector | site `digitall`, OSGi factory config `org.jahia.modules.auth-digitall.cfg` |
 
-`http://localhost:8080` still works for everything else, but it resolves to `systemsite`, which has
-no SAML connector — see *Things that are easy to get wrong* below.
+One SAML connector per site, each built from the host that resolves to that site, so the ACS URL
+Keycloak posts the assertion back to is always the host the visitor started on:
+
+| Host | Site | SP entity ID / Keycloak client | ACS | In the host list? |
+|---|---|---|---|---|
+| **<http://digitall.localhost:8080>** | `digitall` | `jahia-digitall` | `http://digitall.localhost:8080/home.callback.saml` | yes: `/start` goes straight to Keycloak |
+| <http://localhost:8080> | `systemsite` | `jahia-systemsite` | `http://localhost:8080/home.callback.saml` | no: `/start` shows `/saml-login`, whose **Sign in with Google** goes to Keycloak |
+
+The connectors are OSGi factory configs `org.jahia.modules.auth-<site>.cfg`. The realm declares a
+client per site, each admitting only its own host in `redirectUris`. Keycloak imports the realm only
+into an empty realm, so after the realm file gains a client, recreate it:
+`docker compose up -d --force-recreate && ./setup.sh` — `setup.sh` stops with that hint when a
+client is missing.
+
+`saml.tester` has no editing rights, so after logging in, `/start` (the edit-mode entry) answers
+**403**: that is the "logged in, not an editor" page, not a failure. Browse to `/home.html` instead.
 
 ### The user mapper (wired automatically)
 
@@ -121,7 +131,7 @@ connector bound to `digitall` is unreachable by construction, and you get
 behind Administration → Sites → digitall → Web project settings → **Server name**, so the
 configuration is visible where you would look for it. `systemsite` is untouched and
 `localhost → systemsite` still holds. You then browse the SP at `http://digitall.localhost:8080`.
-Browsing at `localhost:8080` lands on systemsite, which has no connector.
+Browsing at `localhost:8080` lands on systemsite, which has its own connector (`jahia-systemsite`).
 
 **`SITE_HOST` must be a real hostname — never `localhost` or `127.0.0.1`.** Jahia rewrites site
 URLs to *absolute* ones built from `j:serverName`, so a loopback literal gets baked into every link
