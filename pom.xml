@@ -13,7 +13,7 @@
 
     <artifactId>saml-login-provider</artifactId>
     <groupId>org.jahia.community</groupId>
-    <version>2.1.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>bundle</packaging>
     <name>Jahia SAML Login/Logout URL Provider</name>
     <description>
