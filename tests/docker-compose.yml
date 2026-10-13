@@ -15,7 +15,46 @@ services:
         extra_hosts:
             - jahia:127.0.0.1
         networks:
-            - stack
+            stack:
+                # The hostname spec 03 browses digitall at. It must be a real name the cypress
+                # container can resolve -- *.localhost is hard-wired to loopback by Chromium, so the
+                # manual fixture's digitall.localhost would hit the cypress container itself. It
+                # shares the jahia.test site with the IdP below, which keeps the IdP's cross-origin
+                # POST back to Jahia same-site, so the session cookie is sent with it.
+                aliases:
+                    - digitall.jahia.test
+    # SAML IdP for spec 03 (full auto-login round trip). CI-only and NOT published on any host
+    # port: only Jahia and the cypress container talk to it, over the stack network. The manual
+    # fixture in saml-idp/ is a separate Keycloak on 127.0.0.1:8180 for a browser on the host; the
+    # two never share a hostname or a port. Same realm file for both.
+    idp:
+        image: quay.io/keycloak/keycloak:25.0
+        container_name: idp
+        command: ['start-dev', '--http-port=8180', '--import-realm']
+        environment:
+            # Disposable admin for a container no host port reaches; spec 03 uses it to give the
+            # SAML test user a fresh random password on every run.
+            - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+            - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin1234}
+            # Every URL Keycloak mints (including the SSO endpoint in its metadata) must be the
+            # address the BROWSER in the cypress container uses.
+            - KC_HOSTNAME=http://idp.jahia.test:8180
+            - KC_HOSTNAME_STRICT=false
+            - KC_HTTP_ENABLED=true
+        volumes:
+            - ./saml-idp/realm:/opt/keycloak/data/import:ro
+        # Healthy once Keycloak listens, which is after the realm import. Cypress waits on it:
+        # spec 03's own readiness poll survives HTTP errors, but not a refused connection.
+        # The image has no curl, hence bash's /dev/tcp.
+        healthcheck:
+            test: ['CMD-SHELL', 'exec 3<>/dev/tcp/127.0.0.1/8180']
+            interval: 5s
+            timeout: 3s
+            retries: 60
+        networks:
+            stack:
+                aliases:
+                    - idp.jahia.test
     # Cypress container
     cypress:
         image: '${TESTS_IMAGE}'
@@ -23,11 +62,16 @@ services:
         ipc: host
         container_name: cypress
         depends_on:
-            - jahia
+            jahia:
+                condition: service_started
+            idp:
+                condition: service_healthy
         environment:
             - MANIFEST=${MANIFEST}
             - SUPER_USER_PASSWORD=${SUPER_USER_PASSWORD}
             - JAHIA_URL=http://jahia:8080
+            - CYPRESS_KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+            - CYPRESS_KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin1234}
             - NEXUS_USERNAME=${NEXUS_USERNAME}
             - NEXUS_PASSWORD=${NEXUS_PASSWORD}
         networks:

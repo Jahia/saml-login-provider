@@ -40,4 +40,23 @@ The advantage of this approach is that you'll get to run the tests in headless o
 
 Do *NOT* forget to load your environment variables using `source set-env.sh` prior to running Cypress, as well as **everytime you open a new terminal**.
 
+### Spec 03: the SAML auto-login round trip
+
+`03-samlAutoLogin.cy.ts` logs a visitor in through a real Keycloak: the `idp` service in
+`docker-compose.yml` (no host port), with the SAML modules installed and enabled on digitall by
+`assets/provisioning.yml`. It browses at `digitall.jahia.test` and `idp.jahia.test`, network aliases
+that only resolve **inside** the compose network — so it cannot run from a local node; the other
+specs can.
+
+To iterate on specs without rebuilding the image, once `ci.startup.sh` has provisioned the stack,
+mount your working copy of `cypress/` into a one-off cypress container:
+
+```bash
+> source set-env.sh
+> docker compose run --rm --no-deps -v "$PWD/cypress:/home/jahians/cypress" \
+    cypress bash -c 'yarn e2e:ci --spec cypress/e2e/03-samlAutoLogin.cy.ts'
+```
+
+The same round trip for a browser on your own machine lives in `saml-idp/` (see its README).
+
 In most situations you will end-up with a lot of unit tests, slightly less API e2e, and fewer UI e2e. Note that the purpose of these tests is to validate the proper behavior/operation of the module being developed. It would likely still be necessary to implement various high level integration tests to ensure your module operate well with other in different "real-life" deployment scenarios (but those tests are typically executed after merging of the code).

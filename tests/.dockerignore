@@ -1,3 +1,8 @@
 results/
 run-artifacts/
 node_modules
+# Never bake local secrets into the test image: the license in .env, and the manual SAML
+# fixture (its local keystore, connector .cfg and .env). The idp service mounts saml-idp/realm
+# from the host, so the image needs nothing from saml-idp/.
+.env
+saml-idp/

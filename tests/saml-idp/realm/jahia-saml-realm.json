@@ -14,7 +14,11 @@
             "protocol": "saml",
             "publicClient": true,
             "frontchannelLogout": true,
-            "redirectUris": ["http://digitall.localhost:8080/*", "http://localhost:8080/*"],
+            "redirectUris": [
+                "http://digitall.localhost:8080/*",
+                "http://localhost:8080/*",
+                "http://digitall.jahia.test:8080/*"
+            ],
             "baseUrl": "http://digitall.localhost:8080/",
             "adminUrl": "http://digitall.localhost:8080/home.callback.saml",
             "attributes": {
@@ -26,8 +30,6 @@
                 "saml_name_id_format": "username",
                 "saml_force_name_id_format": "true",
                 "saml.force.post.binding": "true",
-                "saml_assertion_consumer_url_post": "http://digitall.localhost:8080/home.callback.saml",
-                "saml_assertion_consumer_url_redirect": "http://digitall.localhost:8080/home.callback.saml",
                 "saml_single_logout_service_url_redirect": "http://digitall.localhost:8080/home.html"
             },
             "protocolMappers": [
@@ -38,7 +40,6 @@
                     "consentRequired": false,
                     "config": {
                         "user.attribute": "username",
-                        "friendly.name": "username",
                         "attribute.name": "username",
                         "attribute.nameformat": "Basic"
                     }
@@ -50,7 +51,6 @@
                     "consentRequired": false,
                     "config": {
                         "user.attribute": "email",
-                        "friendly.name": "email",
                         "attribute.name": "email",
                         "attribute.nameformat": "Basic"
                     }
@@ -62,7 +62,6 @@
                     "consentRequired": false,
                     "config": {
                         "user.attribute": "firstName",
-                        "friendly.name": "firstName",
                         "attribute.name": "firstName",
                         "attribute.nameformat": "Basic"
                     }
@@ -74,7 +73,6 @@
                     "consentRequired": false,
                     "config": {
                         "user.attribute": "lastName",
-                        "friendly.name": "lastName",
                         "attribute.name": "lastName",
                         "attribute.nameformat": "Basic"
                     }

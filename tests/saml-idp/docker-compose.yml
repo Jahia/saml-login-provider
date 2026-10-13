@@ -13,6 +13,9 @@
 #   cd tests && ./ci.startup.sh           # brings up jahia + tests_stack
 #   cd tests/saml-idp && ./setup.sh       # this IdP + the auth modules + the connector config
 #
+# CI has its own Keycloak (the `idp` service in ../docker-compose.yml, on no host port) for the same
+# round trip in 03-samlAutoLogin.cy.ts; this one exists for a browser on the host.
+#
 # Keycloak is published on 127.0.0.1:8180 and advertises itself as http://localhost:8180 so that
 # the BROWSER can follow the SAML redirect. Jahia never calls Keycloak back-channel: the IdP
 # metadata (with its signing certificate) is embedded in the connector config as base64, and the

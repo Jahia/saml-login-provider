@@ -1,4 +1,7 @@
 .env
+# Transient provisioning files setup.sh writes and removes; ignored in case a run is interrupted.
+.run.*
+.provisioning.run.json
 idp-metadata.xml
 *.cfg
 sp-keystore.jks

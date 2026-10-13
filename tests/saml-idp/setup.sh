@@ -21,8 +21,7 @@ if [[ -f $ENV_FILE ]]; then
 fi
 
 MISSING=()
-for var in KEYCLOAK_ADMIN KEYCLOAK_ADMIN_PASSWORD SAML_TEST_USER SAML_TEST_USER_PASSWORD \
-           SAML_KEYSTORE_PASS SAML_PRIVATE_KEY_PASS; do
+for var in KEYCLOAK_ADMIN KEYCLOAK_ADMIN_PASSWORD SAML_TEST_USER SAML_TEST_USER_PASSWORD; do
     [[ -n ${!var:-} ]] || MISSING+=("$var")
 done
 if (( ${#MISSING[@]} )); then
@@ -43,7 +42,7 @@ fi
 #
 # digitall is not missing a server name -- it ships with the SAME one systemsite has, so the
 # lookup has two candidates, systemsite wins, and digitall's server name is dead config.
-# configure-site-host.groovy gives digitall its own distinct j:serverName (= SITE_HOST), which is
+# ../cypress/fixtures/groovy/configureSiteHost.groovy gives digitall its own distinct j:serverName (= SITE_HOST), which is
 # the field behind Administration -> Sites -> digitall -> Web project settings -> Server name.
 # systemsite is left alone, so localhost -> systemsite still holds. You then browse the SP at
 # SITE_HOST.
@@ -65,6 +64,11 @@ JAHIA_LOCAL_URL=http://localhost:8080
 REALM=jahia-saml
 SP_ENTITY_ID=jahia-digitall
 KC_URL=http://localhost:8180
+# Where JAHIA fetches the IdP metadata: the Keycloak container over tests_stack. The metadata
+# itself still advertises KC_URL, which is what the browser on this machine follows.
+KC_INTERNAL_URL=http://slp-saml-idp-keycloak:8180
+# Shared with the Cypress specs, which drive the same setup in CI.
+GROOVY_DIR=../cypress/fixtures/groovy
 
 # These three must come from the SAME generation. They wire to each other through
 # org.jahia.modules.jahiaauth.service, and the ranges are narrow:
@@ -76,7 +80,8 @@ KC_URL=http://localhost:8180
 # Mixing generations leaves a bundle unresolved with no visible error beyond
 # /home.connect.saml continuing to answer 400 -- e.g. the previous generation's valve 3.1.1
 # imports [1.7,2) and cannot wire to 2.x at all. Jahia-Required-Version does NOT capture this;
-# it is about the platform, not the package wiring. Check both ends before bumping any of them.
+# it is about the platform, not the package wiring. Check both ends before bumping any of them,
+# and keep ../assets/provisioning.yml (which installs the same three for CI) in step.
 M2=~/.m2/repository/org/jahia/modules
 MODULES=(
     "$M2/jahia-authentication/2.1.0/jahia-authentication-2.1.0.jar"
@@ -86,8 +91,46 @@ MODULES=(
 
 log() { echo "== $*"; }
 
+# Run one of the shared Groovy scripts inside Jahia through the provisioning API, then print the
+# result file it writes inside the container.
+#
+#   run_groovy <script> <result file in the jahia container> NAME=value ...
+#
+# Each NAME=value substitutes @@NAME@@. Values are escaped for sed, and a single quote is refused
+# because the scripts embed the values in single-quoted Groovy literals.
+#
+# The uploaded copy must keep its .groovy extension: executeScript picks the script engine from it.
+# The result file is deleted first and required afterwards -- the provisioning call itself can
+# succeed without the script having run, and a leftover file would otherwise pass for this run's.
+run_groovy() {
+    local script=$1 result=$2; shift 2
+    local sed_args=() pair name value
+    for pair in "$@"; do
+        name=${pair%%=*}; value=${pair#*=}
+        if [[ $value == *"'"* ]]; then
+            echo "ERROR: $name must not contain a single quote: $value" >&2
+            exit 1
+        fi
+        value=$(printf '%s' "$value" | sed -e 's/[\\&|]/\\&/g')
+        sed_args+=(-e "s|@@${name}@@|${value}|g")
+    done
+    local upload=".run.$script"
+    sed "${sed_args[@]}" "$GROOVY_DIR/$script" > "$upload"
+    echo "[{\"executeScript\":\"$upload\"}]" > .provisioning.run.json
+    docker exec jahia rm -f "$result"
+    curl -sf -u "$JAHIA_ADMIN_USER:$SUPER_USER_PASSWORD" \
+        -F script=@.provisioning.run.json \
+        -F file=@"$upload" \
+        "$JAHIA_LOCAL_URL/modules/api/provisioning" -o /dev/null
+    rm -f .provisioning.run.json "$upload"
+    if ! docker exec jahia cat "$result" 2>/dev/null | sed 's/^/   /'; then
+        echo "ERROR: $script did not run (no $result); see 'docker logs jahia'." >&2
+        exit 1
+    fi
+}
+
 # ---------------------------------------------------------------- preconditions
-if ! docker ps --format '{{.Names}}' | grep -qx jahia; then
+if ! docker ps --format '{{.Names}}' | grep -x jahia > /dev/null; then
     echo "ERROR: the 'jahia' container is not running. Run ../ci.startup.sh first." >&2
     exit 1
 fi
@@ -144,17 +187,9 @@ echo "   enabled on $SITE_KEY"
 
 # ---------------------------------------------------------------- 1b. site hostname
 # Without this the connector below is bound to a site no request can resolve to. See the long
-# comment on SITE_KEY above and the header of configure-site-host.groovy.
+# comment on SITE_KEY above and the header of configureSiteHost.groovy.
 log "Setting server name $SITE_HOST on site $SITE_KEY"
-sed -e "s/@@HOST@@/$SITE_HOST/g" -e "s/@@SITE@@/$SITE_KEY/g" \
-    configure-site-host.groovy > .configure-site-host.run.groovy
-echo '[{"executeScript":".configure-site-host.run.groovy"}]' > .provisioning.run.json
-curl -sf -u "$JAHIA_ADMIN_USER:$SUPER_USER_PASSWORD" \
-    -F script=@.provisioning.run.json \
-    -F file=@.configure-site-host.run.groovy \
-    "$JAHIA_LOCAL_URL/modules/api/provisioning" -o /dev/null
-rm -f .provisioning.run.json .configure-site-host.run.groovy
-docker exec jahia cat /tmp/slp-site-host.txt | sed 's/^/   /'
+run_groovy configureSiteHost.groovy /tmp/slp-site-host.txt HOST="$SITE_HOST" SITE="$SITE_KEY"
 
 # ---------------------------------------------------------------- 2. Keycloak
 log "Starting the Keycloak IdP"
@@ -191,86 +226,69 @@ docker exec slp-saml-idp-keycloak /opt/keycloak/bin/kcadm.sh set-password \
 echo "   $SAML_TEST_USER is ready"
 
 # ---------------------------------------------------------------- 3. connector config
-log "Fetching the IdP metadata and building the connector configuration"
-curl -sf "$KC_URL/realms/$REALM/protocol/saml/descriptor" -o idp-metadata.xml
-IDP_B64=$(base64 -w0 < idp-metadata.xml)
+# configureSamlConnector.groovy runs INSIDE Jahia: it fetches the IdP metadata over tests_stack,
+# generates a fresh SP keystore with Jahia's own keytool (random passphrases, never leaving the
+# container), wires the user mapper, and writes org.jahia.modules.auth-$SITE_KEY.cfg atomically.
+# See its header for why the keystore must be supplied and how the mapper value is escaped.
+log "Writing the SAML connector configuration for $SITE_KEY"
+run_groovy configureSamlConnector.groovy /tmp/slp-saml-connector.txt \
+    SITE="$SITE_KEY" \
+    SP_ENTITY_ID="$SP_ENTITY_ID" \
+    SP_BASE_URL="$JAHIA_PUBLIC_URL" \
+    IDP_METADATA_URL="$KC_INTERNAL_URL/realms/$REALM/protocol/saml/descriptor" \
+    POST_LOGIN_PATH="$POST_LOGIN_PATH"
 
-# The SP keystore has to be supplied, not left to the module to generate.
-#
-# SAML2Util.validateSettings() does create one when keyStore is absent, but it does so by
-# mutating the in-memory ConnectorConfig. A .cfg dropped in karaf/etc is read-only (Felix logs
-# "Adding READ_ONLY attribute to configuration" / "File is not writeable"), so that generated
-# keystore is never persisted; the next request re-reads the config without it and pac4j dies
-# with "keystoreResource cannot be null". Auto-generation only works for connectors created
-# through the admin UI, which are JCR-backed and writable.
-if [[ ! -f sp-keystore.jks ]]; then
-    log "Generating the SP keystore"
-    keytool -genkeypair -noprompt \
-        -alias "$SP_ENTITY_ID" -keyalg RSA -keysize 2048 -validity 3650 \
-        -keystore sp-keystore.jks -storetype JKS \
-        -storepass "$SAML_KEYSTORE_PASS" -keypass "$SAML_PRIVATE_KEY_PASS" \
-        -dname "CN=$SP_ENTITY_ID, OU=saml-login-provider tests, O=Jahia, C=FR" 2>/dev/null
+# Felix FileInstall picks the .cfg up asynchronously. The valve answers 400 for SITE_HOST until it
+# has, then serves the HTTP-POST auto-submit form aimed at the IdP. --resolve pins SITE_HOST to
+# loopback for curl builds that do not map *.localhost themselves.
+log "Waiting for the connector to serve $SITE_HOST (up to 60s)"
+CONNECTOR_READY=
+for _ in $(seq 1 20); do
+    # The valve HTML-escapes the form action (http&#x3a;&#x2f;&#x2f;...): decode before matching. The
+    # IdP URL is checked, not just the form, because while Felix reloads the .cfg a previous
+    # connector (e.g. the CI one) still answers with a form aimed at another IdP.
+    # Not grep -q: under pipefail its early exit SIGPIPEs sed/curl and turns a match into a failure.
+    if curl -s --resolve "$SITE_HOST:8080:127.0.0.1" "$JAHIA_PUBLIC_URL/home.connect.saml" \
+            | sed -e 's/&#x3a;/:/g' -e 's|&#x2f;|/|g' | grep -F "$KC_URL/realms/$REALM/" > /dev/null; then
+        CONNECTOR_READY=1
+        echo "   /home.connect.saml on $SITE_HOST posts to the IdP"
+        break
+    fi
+    sleep 3
+done
+if [[ -z $CONNECTOR_READY ]]; then
+    echo "ERROR: the connector never came up on $SITE_HOST; NOT enabling the redirect." >&2
+    exit 1
 fi
-KS_B64=$(base64 -w0 < sp-keystore.jks)
 
-# Factory PID org.jahia.modules.auth, one instance per site, keyed by the siteKey property.
-# jahia-authentication's SettingsServiceImpl is the ManagedServiceFactory behind it, and its
-# updated() calls SAML2Util.validateSettings(), which GENERATES the SP keystore when absent --
-# so there is deliberately no keytool step here.
+# ---------------------------------------------------------------- 4. saml-login-provider
+# Only now that the connector answers: a host in this list without a working connector locks
+# every unauthenticated visitor out (see AGENTS.md, Gotchas). The module matches
+# request.getServerName(), so this must be the host you browse with.
 #
-# identityProviderMetadata and keyStore are binary properties: ConnectorConfig reads them with
-# Base64.getDecoder().decode(getProperty(...)), so base64 in a flat .cfg is exactly right.
-#
-# incomingTargetUrl must end in callback.saml: SAML2Filter matches *.saml and dispatches on the
-# suffix (connect/callback/metadata). The sample .cfg shipped inside the module still carries the
-# pre-3.x /cms/login.SAML.incoming value, which this filter would never see.
-# The user mapper, wired here rather than left to the admin UI.
-#
-# SAML2Filter.handleCallback hands the profile to config.getMappers(); with none configured the
-# assertion is accepted and the callback redirects normally but NO Jahia session is created -- a
-# silent no-op. ConnectorConfig.initMappers reads the mapping as a JSON array from
-# Saml.mappers.<mapperServiceName>.mapping, each entry {"mapper":{"name":..},"connector":{"name":..}}
-# where mapper.name is a jcr-auth-provider field and connector.name a SAML attribute.
-# ssoLoginId is the only mandatory one.
-#
-# ESCAPING: a Felix .cfg value starting with [ or ( is parsed as an array/vector, and " starts a
-# quoted token -- quoting the whole JSON does NOT work (Felix keeps the quotes and the JSON parser
-# fails with "A JSONArray text must start with '['"). Backslash is the escape character, so the
-# leading bracket and every inner quote are backslash-escaped. Single-quoted here so the shell
-# leaves the backslashes alone before the (unquoted) heredoc below interpolates the variable.
-# shellcheck disable=SC2016
-SAML_MAPPING='\[{\"mapper\":{\"name\":\"ssoLoginId\"},\"connector\":{\"name\":\"username\"}},{\"mapper\":{\"name\":\"j:email\"},\"connector\":{\"name\":\"email\"}},{\"mapper\":{\"name\":\"j:firstName\"},\"connector\":{\"name\":\"firstName\"}},{\"mapper\":{\"name\":\"j:lastName\"},\"connector\":{\"name\":\"lastName\"}}]'
-
-CFG=org.jahia.modules.auth-$SITE_KEY.cfg
-cat > "$CFG" <<EOF
-siteKey = $SITE_KEY
-Saml.enabled = true
-Saml.relyingPartyIdentifier = $SP_ENTITY_ID
-Saml.serverLocation = $JAHIA_PUBLIC_URL
-Saml.incomingTargetUrl = /home.callback.saml
-Saml.postLoginPath = $POST_LOGIN_PATH
-Saml.identityProviderMetadata = $IDP_B64
-Saml.keyStore = $KS_B64
-Saml.keyStoreType = JKS
-Saml.keyStoreAlias = $SP_ENTITY_ID
-Saml.keyStorePass = $SAML_KEYSTORE_PASS
-Saml.privateKeyPass = $SAML_PRIVATE_KEY_PASS
-Saml.maximumAuthenticationLifetime = 86400
-Saml.forceAuth = false
-Saml.passive = false
-Saml.signAuthnRequest = false
-Saml.requireSignedAssertions = true
-# New in the 4.x valve: also demand a signature on the response envelope, not just the
-# assertion. Our Keycloak client signs both (saml.server.signature + saml.assertion.signature),
-# so flipping this to true is a valid stricter test; false is the module's own default.
-Saml.requireSignedResponses = false
-Saml.bindingType = urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST
-Saml.mappers.jcrOAuthProvider.enabled = true
-Saml.mappers.jcrOAuthProvider.mapping = $SAML_MAPPING
-EOF
-
-docker cp "$CFG" jahia:/var/jahia/karaf/etc/
-echo "   installed $CFG (Felix FileInstall picks it up within a few seconds)"
+# Through a login session plus a same-host Origin header, not basic auth: Jahia's API security
+# filter only lets a hosted-origin session reach GraphQL, and answers anything else with a 200
+# "Permission denied" body.
+log "Setting the saml-login-provider host list to $SITE_HOST"
+COOKIES=$(mktemp)
+trap 'rm -f "$COOKIES"' EXIT
+LOGIN_RESULT=$(printf '%s' "$SUPER_USER_PASSWORD" | curl -s -c "$COOKIES" \
+    --data-urlencode "username=$JAHIA_ADMIN_USER" --data-urlencode "password@-" --data restMode=true \
+    "$JAHIA_LOCAL_URL/cms/login")
+if [[ $LOGIN_RESULT != OK ]]; then
+    echo "ERROR: could not log in to Jahia as $JAHIA_ADMIN_USER: $LOGIN_RESULT" >&2
+    exit 1
+fi
+FQDN_RESULT=$(curl -sf -b "$COOKIES" \
+    -H 'Content-Type: application/json' -H "Origin: $JAHIA_LOCAL_URL" \
+    -d "{\"query\":\"mutation { samlLoginProvider { update(fqdn: \\\"$SITE_HOST\\\") { fqdn } } }\"}" \
+    "$JAHIA_LOCAL_URL/modules/graphql")
+curl -s -o /dev/null -b "$COOKIES" -X POST "$JAHIA_LOCAL_URL/cms/logout"
+if ! grep -q "\"fqdn\":\"$SITE_HOST\"" <<<"$FQDN_RESULT"; then
+    echo "ERROR: could not set the host list: $FQDN_RESULT" >&2
+    exit 1
+fi
+echo "   host list: $SITE_HOST"
 
 cat <<EOF
 
@@ -280,30 +298,13 @@ cat <<EOF
    Realm            $REALM
    SAML end user    $SAML_TEST_USER
    Jahia SP         $SP_ENTITY_ID  ->  $JAHIA_PUBLIC_URL/home.callback.saml
-   Connector        site '$SITE_KEY', from $CFG
+   Connector        site '$SITE_KEY', org.jahia.modules.auth-$SITE_KEY.cfg, user mapper included
    Site host        $SITE_HOST resolves to $SITE_KEY (localhost still resolves to systemsite)
+   Host list        $SITE_HOST  ($JAHIA_PUBLIC_URL/jahia/administration/samlLoginProvider)
 
-   Browse the SP at $JAHIA_PUBLIC_URL -- NOT at http://localhost:8080, which resolves to
-   systemsite and has no SAML connector.
-
-== One manual step remains -- the user mapper.
-
-   The valve hands the SAML profile to whichever mappers the connector has configured
-   (SAML2Filter.handleCallback -> config.getMappers()). With no mapper, login silently
-   completes without creating a Jahia session. Wire it once in the UI:
-
-     $JAHIA_PUBLIC_URL/jahia/administration  ->  $SITE_KEY  ->  Authentication  ->  SAML
-       -> 'JCR Auth provider' -> map the connector's 'username' field to 'Login username'
-          (ssoLoginId, the only mandatory one) -> Save
-
-== Then, to make saml-login-provider actually redirect you:
-
-   $JAHIA_PUBLIC_URL/jahia/administration/samlLoginProvider  ->  host list: $SITE_HOST
-
-   The module matches request.getServerName(), so it must be the host you browse with
-   ($SITE_HOST) -- not 'jahia', which is only correct from inside the container network, and
-   not 'localhost' unless you also want systemsite enforced. Log out, hit a protected page,
-   and you should land on Keycloak.
+   Try it: open $JAHIA_PUBLIC_URL/start in a private window. You should land on Keycloak, and
+   come back logged in as $SAML_TEST_USER. Browse at $SITE_HOST -- NOT http://localhost:8080,
+   which resolves to systemsite and has no SAML connector.
 
 == If you lock yourself out (host configured but SAML broken):
 
