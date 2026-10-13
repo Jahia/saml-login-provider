@@ -2,9 +2,12 @@ services:
     jahia:
         image: '${JAHIA_IMAGE}'
         container_name: jahia
+        # Bound to loopback only: 8000 is an unauthenticated JDWP debug port (JPDA=true) and the
+        # root password is a well-known test default, so neither may be reachable from the LAN.
+        # Cypress reaches Jahia over the 'stack' network (http://jahia:8080), unaffected by this.
         ports:
-            - '8080:8080'
-            - '8000:8000'
+            - '127.0.0.1:8080:8080'
+            - '127.0.0.1:8000:8000'
         environment:
             - SUPER_USER_PASSWORD=${SUPER_USER_PASSWORD}
             - JAHIA_LICENSE=${JAHIA_LICENSE}

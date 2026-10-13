@@ -23,6 +23,7 @@ settings — the configuration itself is server-wide, and so is its admin route 
 | `HostList` | Parsing/validation of the comma-separated `fqdn` host list |
 | `WebUtils` | Shared URL-encoding and site-key validation helpers |
 | `SamlLoginProviderQueryExtension` / `MutationExtension` | Publish the single `samlLoginProvider` namespace field on `DXGraphQLProvider.Query` / `Mutation` |
+| `SamlLoginProviderGraphQLExtensionsProvider` | `DXGraphQLExtensionsProvider` OSGi component that publishes this package's `@GraphQLTypeExtension` classes to graphql-dxm-provider |
 | `SamlLoginProviderQuery` / `SamlLoginProviderMutation` | Namespace containers holding the actual `config` / `update` operations |
 | `SamlLoginProviderPermissions` | Server-admin permission gate shared by both containers (checks the JCR root node) |
 | `GqlSamlLoginProviderConfig` | GraphQL return type (`{fqdn}`) |
@@ -50,8 +51,11 @@ platform (privilege escalation) — see the Gotchas section.
 ```bash
 mvn clean install
 yarn build
-yarn lint
+yarn lint:js
+yarn lint:scss
 ```
+
+SonarQube project key: `org.jahia.community:saml-login-provider` (`mvn clean install sonar:sonar`).
 
 ## Tests
 
@@ -71,6 +75,10 @@ yarn install
 - Admin path: `/jahia/administration/samlLoginProvider`
 - Specs cover: reading/saving the host list, validation errors, and the `/saml-login` /
   `/home.connect.saml` redirect behavior for configured vs. non-configured hosts
+- Run `mvn clean install` first: `ci.build.sh` copies `../target/*-SNAPSHOT.jar` into the image
+- Results: `docker cp "cypress:/home/jahians/results" .` (from `tests/`; git-ignored)
+- Jahia is published on `127.0.0.1` only (HTTP 8080, JDWP 8000 with JPDA on); Cypress reaches it over the compose network
+- Manual end-to-end login against a real Keycloak SAML IdP (not part of CI): see `tests/saml-idp/README.md`
 
 ## Gotchas
 

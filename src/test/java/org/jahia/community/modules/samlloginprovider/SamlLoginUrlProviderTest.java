@@ -3,6 +3,9 @@ package org.jahia.community.modules.samlloginprovider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -11,6 +14,7 @@ import javax.servlet.http.HttpServletRequest;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
@@ -127,80 +131,34 @@ class SamlLoginUrlProviderTest {
         assertThat(loginUrl).isEqualTo("/home.connect.saml?redirect=%2Fpretty%2Furl%3Fq%3D1");
     }
 
-    @Test
-    void getLoginUrl_plainRequest_appendsEncodedRedirect() {
+    static Stream<Arguments> plainRequestCases() {
+        return Stream.of(
+                // plain request: redirect is the encoded original URI + query
+                Arguments.of("/plain/url", "z=9", "/home.connect.saml?redirect=%2Fplain%2Furl%3Fz%3D9"),
+                // loop guard: original URL ends in ".saml" -> no redirect appended
+                Arguments.of("/home.connect.saml", null, "/home.connect.saml"),
+                // loop guard: original URL ends in the choice-login path -> no redirect appended
+                Arguments.of("/saml-login", null, "/home.connect.saml"),
+                // original URL over the max length -> no redirect appended
+                Arguments.of("/" + "a".repeat(2049), null, "/home.connect.saml"),
+                // every resolution branch (error/forward/plain) yields null -> no redirect appended
+                Arguments.of(null, null, "/home.connect.saml"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("plainRequestCases")
+    void getLoginUrl_plainRequest_appendsRedirectOnlyWhenSafe(String uri, String query, String expected) {
         // Arrange
         activateWithFqdn("configured.example.com");
         when(request.getServerName()).thenReturn("configured.example.com");
         when(request.getContextPath()).thenReturn("");
-        stubPlainRequest("/plain/url", "z=9");
+        stubPlainRequest(uri, query);
 
         // Act
         String loginUrl = provider.getLoginUrl(request);
 
         // Assert
-        assertThat(loginUrl).isEqualTo("/home.connect.saml?redirect=%2Fplain%2Furl%3Fz%3D9");
-    }
-
-    @Test
-    void getLoginUrl_originalUrlEndingInDotSaml_hasNoRedirectParam() {
-        // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
-        when(request.getContextPath()).thenReturn("");
-        stubPlainRequest("/home.connect.saml", null);
-
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert: loop guard -> no redirect appended
-        assertThat(loginUrl).isEqualTo("/home.connect.saml");
-    }
-
-    @Test
-    void getLoginUrl_originalUrlEndingInChoiceLoginPath_hasNoRedirectParam() {
-        // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
-        when(request.getContextPath()).thenReturn("");
-        stubPlainRequest("/saml-login", null);
-
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert
-        assertThat(loginUrl).isEqualTo("/home.connect.saml");
-    }
-
-    @Test
-    void getLoginUrl_originalUrlOverMaxLength_hasNoRedirectParam() {
-        // Arrange
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
-        when(request.getContextPath()).thenReturn("");
-        String hugeUri = "/" + "a".repeat(2049);
-        stubPlainRequest(hugeUri, null);
-
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert
-        assertThat(loginUrl).isEqualTo("/home.connect.saml");
-    }
-
-    @Test
-    void getLoginUrl_requestUriNull_hasNoRedirectParam() {
-        // Arrange: every resolution branch (error/forward/plain) yields null
-        activateWithFqdn("configured.example.com");
-        when(request.getServerName()).thenReturn("configured.example.com");
-        when(request.getContextPath()).thenReturn("");
-        stubPlainRequest(null, null);
-
-        // Act
-        String loginUrl = provider.getLoginUrl(request);
-
-        // Assert
-        assertThat(loginUrl).isEqualTo("/home.connect.saml");
+        assertThat(loginUrl).isEqualTo(expected);
     }
 
     @Test
