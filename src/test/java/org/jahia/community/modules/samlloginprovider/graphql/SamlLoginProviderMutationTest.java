@@ -53,7 +53,7 @@ class SamlLoginProviderMutationTest {
     }
 
     @Test
-    void update_invalidHostSyntax_isRejectedAndNothingIsStored() throws IOException {
+    void update_invalidHostSyntax_isRejectedAndNothingIsStored() {
         try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             // Act / Assert: "-bad.com" has a leading hyphen -> rejected by HostList.isValid

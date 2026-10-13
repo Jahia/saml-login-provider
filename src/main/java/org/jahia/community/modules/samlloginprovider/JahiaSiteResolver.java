@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -73,7 +74,7 @@ public class JahiaSiteResolver implements SiteResolver {
 
     private final Supplier<Map<String, SiteInfo>> siteInfos;
     private final LongSupplier clock;
-    private volatile Snapshot routingIndex;
+    private final AtomicReference<Snapshot> routingIndex = new AtomicReference<>();
 
     public JahiaSiteResolver() {
         this(JahiaSiteResolver::readSites, System::currentTimeMillis);
@@ -115,10 +116,11 @@ public class JahiaSiteResolver implements SiteResolver {
 
     private Snapshot routingIndex() {
         long now = clock.getAsLong();
-        Snapshot current = routingIndex;
+        Snapshot current = routingIndex.get();
         if (current == null || now - current.readAt > ROUTING_CACHE_TTL_MS) {
+            // Concurrent rebuilds are harmless: each snapshot is complete and immutable, last one wins.
             current = new Snapshot(now, safeRead());
-            routingIndex = current;
+            routingIndex.set(current);
         }
         return current;
     }

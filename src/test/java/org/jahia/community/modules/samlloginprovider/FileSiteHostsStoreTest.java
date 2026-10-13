@@ -99,20 +99,27 @@ class FileSiteHostsStoreTest {
     @ParameterizedTest
     @ValueSource(strings = {"../etc", "a/b", "", "_hidden", "site key"})
     void save_unsafeSiteKey_isRejectedBeforeAnyFileIsBuilt(String siteKey) {
+        // Arrange
+        List<String> hosts = List.of("example.com");
+
         // Act / Assert: the site key becomes part of a file name in karaf/etc
-        assertThatThrownBy(() -> store.save(siteKey, List.of("example.com")))
+        assertThatThrownBy(() -> store.save(siteKey, hosts))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void save_nullSiteKey_isRejected() {
-        assertThatThrownBy(() -> store.save(null, List.of("example.com")))
+        List<String> hosts = List.of("example.com");
+
+        assertThatThrownBy(() -> store.save(null, hosts))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void save_invalidHost_isRejected() {
-        assertThatThrownBy(() -> store.save("digitall", List.of("-bad.example.com")))
+        List<String> hosts = List.of("-bad.example.com");
+
+        assertThatThrownBy(() -> store.save("digitall", hosts))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -226,8 +233,10 @@ class FileSiteHostsStoreTest {
         Files.writeString(target, "siteKey = ABC\nfqdn = other.example.com\n");
 
         // Act / Assert
-        assertThatThrownBy(() -> store.save("abc", List.of("abc.example.com"))).isInstanceOf(IOException.class);
-        assertThatThrownBy(() -> store.save("abc", List.of())).isInstanceOf(IOException.class);
+        List<String> someHosts = List.of("abc.example.com");
+        List<String> noHosts = List.of();
+        assertThatThrownBy(() -> store.save("abc", someHosts)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> store.save("abc", noHosts)).isInstanceOf(IOException.class);
         assertThat(Files.readString(target)).contains("siteKey = ABC");
     }
 
