@@ -352,5 +352,7 @@ cat <<EOF
 
 == If you lock yourself out (host configured but SAML broken):
 
-   docker exec jahia sh -c 'echo "fqdn=" > /var/jahia/karaf/etc/org.jahia.community.samlloginprovider.cfg'
+   docker exec jahia rm -f /var/jahia/karaf/etc/org.jahia.community.samlloginprovider.site-$SITE_KEY.cfg
+
+   (the host list is per site: deleting the site's file turns the module off for that site only)
 EOF

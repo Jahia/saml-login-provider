@@ -241,7 +241,7 @@ once your session ends. `HostList.isValid()` checks hostname syntax, not SAML re
 is a plain file, so no UI is needed to recover:
 
 ```bash
-docker exec jahia sh -c 'echo "fqdn=" > /var/jahia/karaf/etc/org.jahia.community.samlloginprovider.cfg'
+docker exec jahia rm -f /var/jahia/karaf/etc/org.jahia.community.samlloginprovider.site-digitall.cfg
 ```
 
 An empty list is the fail-safe "inactive everywhere" state.
