@@ -1,4 +1,4 @@
-# Jahia SAML Login/Logout URL Provider
+# SAML Login Provider
 
 Redirects unauthenticated users straight to the SAML connect endpoint (`/home.connect.saml`)
 instead of the Jahia login page on configured hosts, and points the logout button to a public
