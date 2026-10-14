@@ -85,6 +85,14 @@ is set up:
 | In the site's list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
 | Any other host of the site — including every host when the list is empty | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
 
+After a SAML login the user returns to the page they first asked for, also with an IdP on another
+site such as Google: the module sends the SAML valve's `redirect` cookie with `SameSite=None;
+Secure`, so the browser keeps it across the IdP's cross-site POST back to Jahia. This needs HTTPS
+as the browser sees it (directly, or through a proxy setting `X-Forwarded-Proto: https`); over plain
+HTTP, a cross-site IdP returns users to the connector's `postLoginPath` instead. That one cookie
+deliberately bypasses Tomcat's cookie processor, so a server-wide `sameSiteCookies` setting does not
+apply to it.
+
 A host that no site declares follows the same table with systemsite's settings (see
 [Hosts no site declares](#hosts-no-site-declares-editing-host)).
 
