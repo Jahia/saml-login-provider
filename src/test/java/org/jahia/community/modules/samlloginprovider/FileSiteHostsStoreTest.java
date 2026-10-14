@@ -36,7 +36,7 @@ class FileSiteHostsStoreTest {
     @Test
     void save_writesOneFactoryCfgPerSite_readableAsProperties() throws IOException {
         // Act
-        store.save("digitall", List.of("digitall.example.com", "www.digitall.example.com"));
+        store.save("digitall", List.of("digitall.example.com", "www.digitall.example.com"), "");
 
         // Assert: <factoryPid>-<siteKey>.cfg, which Felix FileInstall turns into a factory config
         Path cfg = etcDir.resolve(FileSiteHostsStore.FACTORY_PID + "-digitall.cfg");
@@ -52,7 +52,7 @@ class FileSiteHostsStoreTest {
     @Test
     void save_isVisibleImmediately_withoutWaitingForConfigAdmin() throws IOException {
         // Act
-        store.save("digitall", List.of("digitall.example.com"));
+        store.save("digitall", List.of("digitall.example.com"), "");
 
         // Assert: read-your-writes, before FileInstall has delivered the file to updated()
         assertThat(store.hosts("digitall")).containsExactly("digitall.example.com");
@@ -61,7 +61,7 @@ class FileSiteHostsStoreTest {
     @Test
     void save_leavesNoTemporaryFileBehind() throws IOException {
         // Act
-        store.save("digitall", List.of("digitall.example.com"));
+        store.save("digitall", List.of("digitall.example.com"), "");
 
         // Assert: only the target .cfg remains (the temp file is moved into place)
         try (Stream<Path> files = Files.list(etcDir)) {
@@ -73,10 +73,10 @@ class FileSiteHostsStoreTest {
     @Test
     void save_emptyList_deletesTheSiteConfiguration() throws IOException {
         // Arrange
-        store.save("digitall", List.of("digitall.example.com"));
+        store.save("digitall", List.of("digitall.example.com"), "");
 
         // Act
-        store.save("digitall", List.of());
+        store.save("digitall", List.of(), "");
 
         // Assert: the site is unconfigured again -- no file, no hosts
         assertThat(etcDir.resolve(FileSiteHostsStore.FACTORY_PID + "-digitall.cfg")).doesNotExist();
@@ -86,10 +86,10 @@ class FileSiteHostsStoreTest {
     @Test
     void save_otherSite_isUntouched() throws IOException {
         // Arrange
-        store.save("digitall", List.of("digitall.example.com"));
+        store.save("digitall", List.of("digitall.example.com"), "");
 
         // Act
-        store.save("other", List.of("other.example.com"));
+        store.save("other", List.of("other.example.com"), "");
 
         // Assert: per-site isolation
         assertThat(store.hosts("digitall")).containsExactly("digitall.example.com");
@@ -103,7 +103,7 @@ class FileSiteHostsStoreTest {
         List<String> hosts = List.of("example.com");
 
         // Act / Assert: the site key becomes part of a file name in karaf/etc
-        assertThatThrownBy(() -> store.save(siteKey, hosts))
+        assertThatThrownBy(() -> store.save(siteKey, hosts, ""))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -111,7 +111,7 @@ class FileSiteHostsStoreTest {
     void save_nullSiteKey_isRejected() {
         List<String> hosts = List.of("example.com");
 
-        assertThatThrownBy(() -> store.save(null, hosts))
+        assertThatThrownBy(() -> store.save(null, hosts, ""))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -119,7 +119,7 @@ class FileSiteHostsStoreTest {
     void save_invalidHost_isRejected() {
         List<String> hosts = List.of("-bad.example.com");
 
-        assertThatThrownBy(() -> store.save("digitall", hosts))
+        assertThatThrownBy(() -> store.save("digitall", hosts, ""))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -235,9 +235,121 @@ class FileSiteHostsStoreTest {
         // Act / Assert
         List<String> someHosts = List.of("abc.example.com");
         List<String> noHosts = List.of();
-        assertThatThrownBy(() -> store.save("abc", someHosts)).isInstanceOf(IOException.class);
-        assertThatThrownBy(() -> store.save("abc", noHosts)).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> store.save("abc", someHosts, "")).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> store.save("abc", noHosts, "")).isInstanceOf(IOException.class);
         assertThat(Files.readString(target)).contains("siteKey = ABC");
+    }
+
+    @Test
+    void save_buttonLabel_isStoredUrlEncoded_andVisibleImmediately() throws IOException {
+        // Act: FileInstall reads .cfg values as typed properties ([..] arrays, "..", ${..}): encoded,
+        // a label can never be mistaken for one, nor break the site's host list
+        store.save("digitall", List.of("digitall.example.com"), "Connexion \"SSO\" [${env}] é+%");
+
+        // Assert
+        Path cfg = etcDir.resolve(FileSiteHostsStore.FACTORY_PID + "-digitall.cfg");
+        Properties props = new Properties();
+        try (Reader reader = Files.newBufferedReader(cfg)) {
+            props.load(reader);
+        }
+        assertThat(props.getProperty("buttonLabel")).matches("[A-Za-z0-9%+._*-]+");
+        assertThat(ButtonLabel.decode(props.getProperty("buttonLabel"))).isEqualTo("Connexion \"SSO\" [${env}] é+%");
+        assertThat(store.buttonLabel("digitall")).isEqualTo("Connexion \"SSO\" [${env}] é+%");
+        assertThat(store.hosts("digitall")).containsExactly("digitall.example.com");
+    }
+
+    @Test
+    void save_labelWithoutHosts_keepsTheSiteConfiguration() throws IOException {
+        store.save("digitall", List.of(), "Sign in with SSO");
+
+        assertThat(etcDir.resolve(FileSiteHostsStore.FACTORY_PID + "-digitall.cfg")).exists();
+        assertThat(store.hosts("digitall")).isEmpty();
+        assertThat(store.buttonLabel("digitall")).isEqualTo("Sign in with SSO");
+    }
+
+    @Test
+    void save_noHostsAndNoLabel_deletesTheSiteConfiguration() throws IOException {
+        store.save("digitall", List.of(), "Sign in with SSO");
+
+        store.save("digitall", List.of(), "");
+
+        assertThat(etcDir.resolve(FileSiteHostsStore.FACTORY_PID + "-digitall.cfg")).doesNotExist();
+        assertThat(store.buttonLabel("digitall")).isEmpty();
+    }
+
+    @Test
+    void save_invalidLabel_isRejectedAndNothingIsWritten() {
+        List<String> hosts = List.of("digitall.example.com");
+        String tooLong = "x".repeat(ButtonLabel.MAX_LENGTH + 1);
+
+        assertThatThrownBy(() -> store.save("digitall", hosts, tooLong)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> store.save("digitall", hosts, "a\nb")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(etcDir.resolve(FileSiteHostsStore.FACTORY_PID + "-digitall.cfg")).doesNotExist();
+    }
+
+    @Test
+    void buttonLabel_unknownOrNullSite_isEmpty() {
+        assertThat(store.buttonLabel("digitall")).isEmpty();
+        assertThat(store.buttonLabel(null)).isEmpty();
+    }
+
+    @Test
+    void updated_readsTheEncodedLabel_andAHandWrittenOne() throws ConfigurationException {
+        Dictionary<String, Object> encoded = props("digitall", "digitall.example.com");
+        encoded.put("buttonLabel", ButtonLabel.encode("Se connecter avec Google é"));
+        Dictionary<String, Object> handWritten = props("other", "");
+        handWritten.put("buttonLabel", "Sign in with SSO");
+
+        store.updated("pid-1", encoded);
+        store.updated("pid-2", handWritten);
+
+        assertThat(store.buttonLabel("digitall")).isEqualTo("Se connecter avec Google é");
+        // A label alone configures the site, without any host
+        assertThat(store.buttonLabel("other")).isEqualTo("Sign in with SSO");
+        assertThat(store.hosts("other")).isEmpty();
+    }
+
+    @Test
+    void updated_invalidLabel_isRejectedAndLeavesTheSiteUnchanged() throws ConfigurationException {
+        store.updated("pid-1", props("digitall", "digitall.example.com"));
+        Dictionary<String, Object> broken = props("digitall", "digitall.example.com,www.digitall.example.com");
+        broken.put("buttonLabel", "%zz");
+
+        assertThatThrownBy(() -> store.updated("pid-1", broken)).isInstanceOf(ConfigurationException.class);
+        assertThat(store.hosts("digitall")).containsExactly("digitall.example.com");
+    }
+
+    @Test
+    void save_nullLabel_keepsTheCurrentOne_insideTheSameWrite() throws IOException {
+        // Resolved inside save, so a concurrent label change cannot be overwritten with a stale read
+        store.save("digitall", List.of(), "Sign in with SSO");
+
+        store.save("digitall", List.of("digitall.example.com"), null);
+
+        assertThat(store.buttonLabel("digitall")).isEqualTo("Sign in with SSO");
+        assertThat(store.hosts("digitall")).containsExactly("digitall.example.com");
+    }
+
+    @Test
+    void updated_nonTextLabel_isRejected() throws ConfigurationException {
+        // A hand-written "buttonLabel = [a,b]" reaches updated() as an array
+        store.updated("pid-1", props("digitall", "digitall.example.com"));
+        Dictionary<String, Object> typed = props("digitall", "digitall.example.com");
+        typed.put("buttonLabel", new String[]{"a", "b"});
+
+        assertThatThrownBy(() -> store.updated("pid-1", typed)).isInstanceOf(ConfigurationException.class);
+        assertThat(store.buttonLabel("digitall")).isEmpty();
+    }
+
+    @Test
+    void deleted_dropsTheLabelToo() throws ConfigurationException {
+        Dictionary<String, Object> withLabel = props("digitall", "");
+        withLabel.put("buttonLabel", "Sign in with SSO");
+        store.updated("pid-1", withLabel);
+
+        store.deleted("pid-1");
+
+        assertThat(store.buttonLabel("digitall")).isEmpty();
     }
 
     @Test

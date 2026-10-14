@@ -14,12 +14,15 @@ public class GqlSamlLoginProviderConfig {
     private final String fqdn;
     private final List<String> serverNames;
     private final boolean samlConfigured;
+    private final String buttonLabel;
 
-    public GqlSamlLoginProviderConfig(String siteKey, String fqdn, List<String> serverNames, boolean samlConfigured) {
+    public GqlSamlLoginProviderConfig(String siteKey, String fqdn, List<String> serverNames, boolean samlConfigured,
+                                      String buttonLabel) {
         this.siteKey = siteKey;
         this.fqdn = fqdn;
         this.serverNames = List.copyOf(serverNames);
         this.samlConfigured = samlConfigured;
+        this.buttonLabel = buttonLabel;
     }
 
     @GraphQLField
@@ -50,5 +53,12 @@ public class GqlSamlLoginProviderConfig {
             + "whatever its host list says")
     public boolean isSamlConfigured() {
         return samlConfigured;
+    }
+
+    @GraphQLField
+    @GraphQLName("buttonLabel")
+    @GraphQLDescription("Text of the login page's SAML sign-in button; empty = the default (translated) label")
+    public String getButtonLabel() {
+        return buttonLabel;
     }
 }

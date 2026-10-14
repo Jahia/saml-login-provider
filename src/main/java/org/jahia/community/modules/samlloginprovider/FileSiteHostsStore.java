@@ -50,6 +50,8 @@ public class FileSiteHostsStore implements SiteHostsStore, ManagedServiceFactory
 
     static final String SITE_KEY_PROPERTY = "siteKey";
     static final String HOSTS_PROPERTY = "fqdn";
+    /** URL-encoded, see {@link ButtonLabel}. */
+    static final String BUTTON_LABEL_PROPERTY = "buttonLabel";
     /** Set by Felix FileInstall on configurations it creates from a file. */
     private static final String FILEINSTALL_FILENAME_PROPERTY = "felix.fileinstall.filename";
 
@@ -59,8 +61,10 @@ public class FileSiteHostsStore implements SiteHostsStore, ManagedServiceFactory
     private final Path etcDir;
     /** ConfigurationAdmin PID -> site key, to know which site a {@link #deleted} call removes. */
     private final Map<String, String> siteKeyByPid = new ConcurrentHashMap<>();
-    /** Site key -> immutable host list. Absent = site not configured. */
+    /** Site key -> immutable host list. Absent = no host. */
     private final Map<String, List<String>> hostsBySite = new ConcurrentHashMap<>();
+    /** Site key -> custom sign-in button text. Absent = the default label. */
+    private final Map<String, String> buttonLabelBySite = new ConcurrentHashMap<>();
 
     public FileSiteHostsStore() {
         this(Paths.get(System.getProperty(KARAF_ETC_PROPERTY, "etc")));
@@ -76,20 +80,29 @@ public class FileSiteHostsStore implements SiteHostsStore, ManagedServiceFactory
     }
 
     @Override
-    public synchronized void save(String siteKey, List<String> hosts) throws IOException {
+    public String buttonLabel(String siteKey) {
+        return siteKey == null ? "" : buttonLabelBySite.getOrDefault(siteKey, "");
+    }
+
+    @Override
+    public synchronized void save(String siteKey, List<String> hosts, String buttonLabel) throws IOException {
         requireValidSiteKey(siteKey);
         if (!HostList.isValid(hosts)) {
             throw new IllegalArgumentException("Invalid host list");
         }
+        // "Keep" is resolved here, under the same lock as the write: never a stale read by the caller
+        String label = buttonLabel == null ? buttonLabel(siteKey) : ButtonLabel.normalize(buttonLabel);
+        if (!ButtonLabel.isValid(label)) {
+            throw new IllegalArgumentException("Invalid button label");
+        }
         Path target = etcDir.resolve(fileNameOf(siteKey));
         requireOwnedBy(target, siteKey);
-        if (hosts.isEmpty()) {
+        if (hosts.isEmpty() && label.isEmpty()) {
             Files.deleteIfExists(target);
-            hostsBySite.remove(siteKey);
-            return;
+        } else {
+            writeAtomically(target, siteKey, HostList.canonical(hosts), label);
         }
-        writeAtomically(target, siteKey, HostList.canonical(hosts));
-        hostsBySite.put(siteKey, List.copyOf(hosts));
+        apply(siteKey, hosts, label);
     }
 
     @Override
@@ -115,37 +128,73 @@ public class FileSiteHostsStore implements SiteHostsStore, ManagedServiceFactory
             // Reject the whole update: a hand-edited file with one bad host must not half-apply.
             throw new ConfigurationException(HOSTS_PROPERTY, "invalid host list for site " + siteKey);
         }
+        String label = readButtonLabel(siteKey, properties.get(BUTTON_LABEL_PROPERTY));
 
         String previousSiteKey = siteKeyByPid.put(pid, siteKey);
         if (previousSiteKey != null && !previousSiteKey.equals(siteKey)) {
-            hostsBySite.remove(previousSiteKey);
+            apply(previousSiteKey, List.of(), "");
         }
-        if (hosts.isEmpty()) {
-            hostsBySite.remove(siteKey);
-        } else {
-            hostsBySite.put(siteKey, List.copyOf(hosts));
-        }
-        LOGGER.info("SAML login hosts for site {}: {}", siteKey, hosts.isEmpty() ? "(none)" : hosts);
+        apply(siteKey, hosts, label);
+        LOGGER.info("SAML login hosts for site {}: {}; button label: {}", siteKey,
+                hosts.isEmpty() ? "(none)" : hosts, label.isEmpty() ? "(default)" : label);
     }
 
     @Override
     public synchronized void deleted(String pid) {
         String siteKey = siteKeyByPid.remove(pid);
         if (siteKey != null) {
-            hostsBySite.remove(siteKey);
-            LOGGER.info("SAML login hosts for site {} removed", siteKey);
+            apply(siteKey, List.of(), "");
+            LOGGER.info("SAML login configuration of site {} removed", siteKey);
         }
+    }
+
+    /** The in-memory view of one site: absent entries mean no host and the default label. */
+    private void apply(String siteKey, List<String> hosts, String label) {
+        if (hosts.isEmpty()) {
+            hostsBySite.remove(siteKey);
+        } else {
+            hostsBySite.put(siteKey, List.copyOf(hosts));
+        }
+        if (label.isEmpty()) {
+            buttonLabelBySite.remove(siteKey);
+        } else {
+            buttonLabelBySite.put(siteKey, label);
+        }
+    }
+
+    /** Rejects the whole update on a bad label, like on a bad host: a file must not half-apply. */
+    private static String readButtonLabel(String siteKey, Object stored) throws ConfigurationException {
+        if (stored == null) {
+            return "";
+        }
+        if (!(stored instanceof String)) {
+            // e.g. a hand-written "[a,b]", which FileInstall's typed parsing turns into an array
+            throw new ConfigurationException(BUTTON_LABEL_PROPERTY, "not a text value for site " + siteKey);
+        }
+        String label;
+        try {
+            label = ButtonLabel.normalize(ButtonLabel.decode((String) stored));
+        } catch (IllegalArgumentException e) {
+            throw new ConfigurationException(BUTTON_LABEL_PROPERTY, "invalid URL encoding for site " + siteKey, e);
+        }
+        if (!ButtonLabel.isValid(label)) {
+            throw new ConfigurationException(BUTTON_LABEL_PROPERTY, "invalid button label for site " + siteKey);
+        }
+        return label;
     }
 
     /**
      * Writes next to the target under a name FileInstall ignores, then moves it into place in one
      * step, so FileInstall never reads a half-written file.
      */
-    private void writeAtomically(Path target, String siteKey, String canonicalHosts) throws IOException {
-        // Both values are validated: a plain site key and hosts made of [a-z0-9.-,] need no escaping.
+    private void writeAtomically(Path target, String siteKey, String canonicalHosts, String label)
+            throws IOException {
+        // A plain site key and hosts made of [a-z0-9.-,] need no escaping; the label is URL-encoded.
         String content = "# saml-login-provider: hosts of site " + siteKey + " sent straight to SAML login\n"
                 + SITE_KEY_PROPERTY + " = " + siteKey + "\n"
-                + HOSTS_PROPERTY + " = " + canonicalHosts + "\n";
+                + HOSTS_PROPERTY + " = " + canonicalHosts + "\n"
+                + (label.isEmpty() ? "" : "# sign-in button text, URL-encoded (UTF-8)\n"
+                + BUTTON_LABEL_PROPERTY + " = " + ButtonLabel.encode(label) + "\n");
         Files.createDirectories(etcDir);
         Path temp = Files.createTempFile(etcDir, "." + FACTORY_PID + "-" + siteKey + "-", ".tmp");
         try {

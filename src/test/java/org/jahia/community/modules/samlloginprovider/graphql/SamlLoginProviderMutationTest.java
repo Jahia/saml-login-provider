@@ -1,5 +1,6 @@
 package org.jahia.community.modules.samlloginprovider.graphql;
 
+import org.jahia.community.modules.samlloginprovider.ButtonLabel;
 import org.jahia.community.modules.samlloginprovider.SamlSetup;
 import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
 import org.jahia.community.modules.samlloginprovider.SiteResolver;
@@ -45,7 +46,7 @@ class SamlLoginProviderMutationTest {
                     .thenThrow(new SecurityException("Access denied"));
 
             // Act / Assert
-            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com"))
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com", null))
                     .isInstanceOf(SecurityException.class)
                     .hasMessageContaining("Access denied");
             services.verifyNoInteractions();
@@ -57,7 +58,7 @@ class SamlLoginProviderMutationTest {
         try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             // Act / Assert: "-bad.com" has a leading hyphen -> rejected by HostList.isValid
-            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com,-bad.com"))
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com,-bad.com", null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Invalid host list");
             permissions.verify(() -> SamlLoginProviderPermissions.checkSiteAdmin(SITE_KEY));
@@ -74,11 +75,11 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
 
             // Act / Assert: the error lists the site's own names (trusted), never the submitted value
-            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com,victim.example.org"))
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com,victim.example.org", null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("digitall.example.com, www.digitall.example.com")
                     .satisfies(e -> assertThat(e.getMessage()).doesNotContain("victim.example.org"));
-            verify(store, never()).save(anyString(), anyList());
+            verify(store, never()).save(anyString(), anyList(), anyString());
         }
     }
 
@@ -95,13 +96,81 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
-            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, " Digitall.EXAMPLE.com , www.digitall.example.com ");
+            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, " Digitall.EXAMPLE.com , www.digitall.example.com ", null);
 
             // Assert
-            verify(store).save(SITE_KEY, List.of("digitall.example.com", "www.digitall.example.com"));
+            verify(store).save(SITE_KEY, List.of("digitall.example.com", "www.digitall.example.com"), null);
             assertThat(result.getSiteKey()).isEqualTo(SITE_KEY);
             assertThat(result.getFqdn()).isEqualTo("digitall.example.com,www.digitall.example.com");
             assertThat(result.getServerNames()).containsExactly("digitall.example.com", "www.digitall.example.com");
+        }
+    }
+
+    @Test
+    void update_buttonLabel_isStoredTrimmed_andReturned() throws IOException {
+        // Arrange
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
+
+            // Act
+            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, "", "  Sign in with SSO ");
+
+            // Assert
+            verify(store).save(SITE_KEY, List.of(), "Sign in with SSO");
+            assertThat(result.getButtonLabel()).isEqualTo("Sign in with SSO");
+        }
+    }
+
+    @Test
+    void update_noButtonLabel_keepsTheCurrentOne() throws IOException {
+        // Callers that only manage the host list (the label argument omitted) must not reset it
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
+        when(store.buttonLabel(SITE_KEY)).thenReturn("Sign in with SSO");
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
+
+            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, "", null);
+
+            // "keep" goes through to the store, which resolves it inside its synchronized write
+            verify(store).save(SITE_KEY, List.of(), null);
+            assertThat(result.getButtonLabel()).isEqualTo("Sign in with SSO");
+        }
+    }
+
+    @Test
+    void update_emptyButtonLabel_restoresTheDefault() throws IOException {
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
+
+            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, "", "");
+
+            verify(store).save(SITE_KEY, List.of(), "");
+            assertThat(result.getButtonLabel()).isEmpty();
+        }
+    }
+
+    @Test
+    void update_invalidButtonLabel_isRejected_withoutEchoingIt() throws IOException {
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            String label = "x".repeat(ButtonLabel.MAX_LENGTH) + "<script>";
+
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "", label))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .satisfies(e -> assertThat(e.getMessage()).doesNotContain("<script>"));
+            verify(store, never()).save(anyString(), anyList(), anyString());
         }
     }
 
@@ -116,10 +185,10 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
-            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, null);
+            GqlSamlLoginProviderConfig result = mutation.update(SITE_KEY, null, null);
 
             // Assert
-            verify(store).save(SITE_KEY, List.of());
+            verify(store).save(SITE_KEY, List.of(), null);
             assertThat(result.getFqdn()).isEmpty();
         }
     }
@@ -136,10 +205,10 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act
-            GqlSamlLoginProviderConfig result = mutation.update("systemsite", "edit.example.com");
+            GqlSamlLoginProviderConfig result = mutation.update("systemsite", "edit.example.com", null);
 
             // Assert
-            verify(store).save("systemsite", List.of("edit.example.com"));
+            verify(store).save("systemsite", List.of("edit.example.com"), null);
             assertThat(result.getFqdn()).isEqualTo("edit.example.com");
         }
     }
@@ -154,9 +223,9 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
 
             // Act / Assert
-            assertThatThrownBy(() -> mutation.update("systemsite", "digitall.example.com"))
+            assertThatThrownBy(() -> mutation.update("systemsite", "digitall.example.com", null))
                     .isInstanceOf(IllegalStateException.class);
-            verify(store, never()).save(anyString(), anyList());
+            verify(store, never()).save(anyString(), anyList(), anyString());
         }
     }
 
@@ -169,9 +238,9 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
 
             // Act / Assert
-            assertThatThrownBy(() -> mutation.update(SITE_KEY, "edit.example.com"))
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "edit.example.com", null))
                     .isInstanceOf(IllegalArgumentException.class);
-            verify(store, never()).save(anyString(), anyList());
+            verify(store, never()).save(anyString(), anyList(), anyString());
         }
     }
 
@@ -185,10 +254,10 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
 
             // Act / Assert: the error never names the other site
-            assertThatThrownBy(() -> mutation.update("systemsite", "digitall.example.com"))
+            assertThatThrownBy(() -> mutation.update("systemsite", "digitall.example.com", null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .satisfies(e -> assertThat(e.getMessage()).doesNotContain(SITE_KEY));
-            verify(store, never()).save(anyString(), anyList());
+            verify(store, never()).save(anyString(), anyList(), anyString());
         }
     }
 
@@ -203,11 +272,11 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
 
             // Act / Assert: the other site is not named
-            assertThatThrownBy(() -> mutation.update(SITE_KEY, "localhost"))
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "localhost", null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("also declared by another site")
                     .satisfies(e -> assertThat(e.getMessage()).doesNotContain("otherSite"));
-            verify(store, never()).save(anyString(), anyList());
+            verify(store, never()).save(anyString(), anyList(), anyString());
         }
     }
 
@@ -216,7 +285,7 @@ class SamlLoginProviderMutationTest {
         // Arrange
         when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
         when(resolver.sitesClaiming("digitall.example.com")).thenReturn(Set.of(SITE_KEY));
-        doThrow(new IOException("disk failure detail")).when(store).save(anyString(), any());
+        doThrow(new IOException("disk failure detail")).when(store).save(anyString(), any(), any());
         try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
              MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
             services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
@@ -224,7 +293,7 @@ class SamlLoginProviderMutationTest {
             services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
 
             // Act / Assert
-            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com"))
+            assertThatThrownBy(() -> mutation.update(SITE_KEY, "digitall.example.com", null))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessage("Unable to store the SAML login configuration")
                     .satisfies(e -> assertThat(e.getMessage()).doesNotContain("disk failure detail"));

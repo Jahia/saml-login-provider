@@ -8,7 +8,10 @@
     "saving": "Saving…",
     "loading": "Loading…",
     "retry": "Retry",
-    "fqdn_hint_no_server_names": "List the hosts that should go straight to SAML login."
+    "fqdn_hint_no_server_names": "List the hosts that should go straight to SAML login.",
+    "buttonLabel": "Sign-in button text",
+    "buttonLabel_hint": "Text of the SAML sign-in button on this site's login page. Leave it empty for the default text, shown in each visitor's language.",
+    "buttonLabel_default": "Sign in with Google"
   },
   "samlLoginProvider": {
     "description": "On this site, unauthenticated visitors get a login page offering both the credentials form and SAML sign-in. Visitors arriving on the hosts listed below skip it and go straight to the SAML connect endpoint (/home.connect.saml); the logout button then lands on a public page.",
@@ -34,6 +37,9 @@
       "fqdn": {
         "invalid": "Enter a comma-separated list of valid hostnames (e.g. editpp.jahia.com), or leave the field empty.",
         "notSiteHost": "Each host must be one of this site's hosts: {{serverNames}}."
+      },
+      "buttonLabel": {
+        "invalid": "Enter plain text of at most {{max}} characters, on one line."
       }
     },
     "samlMissing": "No SAML connector is set up for {{siteKey}}: its visitors keep the standard Jahia login until one is (Authentication settings of the site)."

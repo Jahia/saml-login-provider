@@ -11,7 +11,7 @@ import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
  * GraphQL {@code Query} type (see {@code DXGraphQLProvider.Query}), with the
  * actual operations nested as fields of {@link SamlLoginProviderQuery}. Flat
  * root-level fields from different bundles can collide by name and break the
- * platform-wide GraphQL schema for every module — grouping under one
+ * platform-wide GraphQL schema for every module; grouping under one
  * namespace container (mirroring the {@code securitytxt} module's
  * {@code SecurityTxtQueryExtension}) avoids that.
  */

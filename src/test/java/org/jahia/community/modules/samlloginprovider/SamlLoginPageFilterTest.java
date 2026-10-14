@@ -382,6 +382,122 @@ class SamlLoginPageFilterTest {
         assertThat(googleForm(body.toString())).doesNotContain("siteKey");
     }
 
+    @Test
+    void doFilter_siteWithAButtonLabel_showsIt_htmlEscaped() throws Exception {
+        // Arrange
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("digitall.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("digitall.example.com", "digitall", false));
+        filter.setSiteHostsStore(storeWithLabel("digitall", "Sign in with <b>Acme</b> SSO"));
+
+        // Act
+        filter.doFilter(request, response, chain);
+
+        // Assert: the button and the form's accessible name
+        String google = googleForm(body.toString());
+        assertThat(google).contains(">Sign in with &lt;b&gt;Acme&lt;/b&gt; SSO</button>")
+                .contains("aria-label=\"Sign in with &lt;b&gt;Acme&lt;/b&gt; SSO\"")
+                .doesNotContain("<b>");
+    }
+
+    @Test
+    void doFilter_labelWithQuotesAndTokens_isRenderedLiterally() throws Exception {
+        // Quotes stay inside the aria-label attribute; token or replacement syntax is never expanded
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("/ctx", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("digitall.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("digitall.example.com", "digitall", false));
+        filter.setSiteHostsStore(storeWithLabel("digitall", "Say \"hi\" & 'bye' __CTX__ $1"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString()))
+                .contains("aria-label=\"Say &quot;hi&quot; &amp; &#39;bye&#39; __CTX__ $1\"")
+                .contains(">Say &quot;hi&quot; &amp; &#39;bye&#39; __CTX__ $1</button>");
+    }
+
+    @Test
+    void doFilter_hostSharedBySeveralSites_showsTheDefault() throws Exception {
+        // No single site governs a shared host: not even systemsite's label applies
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("localhost");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("localhost", null, false));
+        filter.setSiteHostsStore(storeWithLabel(LoginSite.SYSTEMSITE, "Systemsite only"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).contains(">Sign in with Google</button>");
+    }
+
+    @Test
+    void doFilter_hostOfNoSite_showsSystemsitesLabel() throws Exception {
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("edit.example.com", null, true));
+        filter.setSiteHostsStore(storeWithLabel(LoginSite.SYSTEMSITE, "Editors: sign in with SSO"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).contains(">Editors: sign in with SSO</button>");
+    }
+
+    @Test
+    void doFilter_siteWithoutALabel_showsTheDefault() throws Exception {
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("digitall.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("digitall.example.com", "digitall", false));
+        filter.setSiteHostsStore(storeWithLabel("other", "Not this one"));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).contains(">Sign in with Google</button>");
+    }
+
+    @Test
+    void doFilter_storeFailure_showsTheDefault() throws Exception {
+        // A label must never break the login page
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("", Locale.ENGLISH);
+        when(request.getServerName()).thenReturn("digitall.example.com");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+        filter.setSiteResolver(resolverWhere("digitall.example.com", "digitall", false));
+        SiteHostsStore failing = org.mockito.Mockito.mock(SiteHostsStore.class);
+        when(failing.buttonLabel("digitall")).thenThrow(new IllegalStateException("boom"));
+        filter.setSiteHostsStore(failing);
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).contains(">Sign in with Google</button>");
+    }
+
+    private static SiteHostsStore storeWithLabel(String siteKey, String label) {
+        return new SiteHostsStore() {
+            @Override
+            public java.util.List<String> hosts(String key) {
+                return java.util.List.of();
+            }
+
+            @Override
+            public String buttonLabel(String key) {
+                return siteKey.equals(key) ? label : "";
+            }
+
+            @Override
+            public void save(String key, java.util.List<String> hosts, String buttonLabel) {
+                throw new UnsupportedOperationException();
+            }
+        };
+    }
+
     private static String googleForm(String page) {
         int start = page.indexOf("<form id=\"googleLoginForm\"");
         return page.substring(start, page.indexOf("</form>", start));

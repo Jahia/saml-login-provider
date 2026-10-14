@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 
 /**
  * Serves {@code /saml-login}: a page visually identical to Jahia's standard
- * login page ({@code errors/error_401.jsp} — same CSS and markup) with an
+ * login page ({@code errors/error_401.jsp}: same CSS and markup) with an
  * additional "Sign in with Google" button that launches the SAML flow
  * ({@code /home.connect.saml}).
  *
@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  * <p>Form contract (mirrors the {@code ui:loginArea} tag): POST
  * {@code /cms/login} with {@code username}, {@code password},
  * {@code useCookie}, hidden {@code site}/{@code redirect} and a
- * {@code failureRedirect} pointing back to this page — failed logins return
+ * {@code failureRedirect} pointing back to this page: failed logins return
  * here with a {@code loginError} parameter (codes from {@code org.jahia.bin.Login}).
  */
 @Component(immediate = true, service = AbstractServletFilter.class)
@@ -65,9 +65,17 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
      */
     private SiteResolver siteResolver;
 
+    /** Same publication as {@link #siteResolver}; {@code null} only in tests -- then the default label. */
+    private SiteHostsStore siteHostsStore;
+
     @Reference
     public void setSiteResolver(SiteResolver siteResolver) {
         this.siteResolver = siteResolver;
+    }
+
+    @Reference
+    public void setSiteHostsStore(SiteHostsStore siteHostsStore) {
+        this.siteHostsStore = siteHostsStore;
     }
 
     @Activate
@@ -141,13 +149,16 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         tokens.put("__FAILURE_REDIRECT_FIELD__", hiddenField("failureRedirect", failureRedirect(contextPath, redirect)));
         tokens.put("__LABEL_TITLE__", loginError == null
                 ? loginLabel
-                : label(locale, "label.loginErrorTitle", "Login — authentication failed"));
+                : label(locale, "label.loginErrorTitle", "Login: authentication failed"));
         tokens.put("__LABEL_USERNAME__", label(locale, "label.username", "Username"));
         tokens.put("__LABEL_PASSWORD__", label(locale, "label.password", "Password"));
         tokens.put("__LABEL_REMEMBERME__", label(locale, "label.rememberme", "Remember me"));
         tokens.put("__LABEL_LOGIN__", loginLabel);
         tokens.put("__LABEL_OR__", label(locale, "label.or", "or"));
-        tokens.put("__LABEL_GOOGLE__", label(locale, "label.samlLogin", "Sign in with Google"));
+        String customLabel = customButtonLabel(request);
+        tokens.put("__LABEL_GOOGLE__", customLabel.isEmpty()
+                ? label(locale, "label.samlLogin", "Sign in with Google")
+                : escapeHtml(customLabel));
 
         return substitute(template, tokens);
     }
@@ -170,7 +181,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
     }
 
     /**
-     * Only relative same-host paths are accepted as post-login targets —
+     * Only relative same-host paths are accepted as post-login targets:
      * the same policy as {@code Login.isAuthorizedRedirect} for relative URLs.
      */
     private static String safeRelativeRedirect(String redirect) {
@@ -254,6 +265,21 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         }
     }
 
+    /** The governing site's button text (see {@link LoginSite}); empty = the translated default. */
+    private String customButtonLabel(HttpServletRequest request) {
+        String serverName = request.getServerName();
+        if (siteResolver == null || siteHostsStore == null || serverName == null) {
+            return "";
+        }
+        try {
+            LoginSite site = LoginSite.of(siteResolver, serverName.toLowerCase(Locale.ROOT));
+            return site == null ? "" : ButtonLabel.normalize(siteHostsStore.buttonLabel(site.siteKey()));
+        } catch (RuntimeException e) {
+            LOGGER.warn("Could not read the sign-in button text for host {}; using the default", serverName, e);
+            return "";
+        }
+    }
+
     private static String hiddenField(String name, String value) {
         if (value.isEmpty()) {
             return "";
@@ -267,7 +293,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
             return escapeHtml(ResourceBundles.get("JahiaInternalResources", locale).getString(key));
         } catch (RuntimeException e) {
             // A missing key, a missing bundle, or a non-container unit-test run all fall back to
-            // the default label — a label must never break the login page — but record why.
+            // the default label (a label must never break the login page), but record why.
             LOGGER.debug("Falling back to default label for key '{}'", key, e);
             return escapeHtml(fallback);
         }

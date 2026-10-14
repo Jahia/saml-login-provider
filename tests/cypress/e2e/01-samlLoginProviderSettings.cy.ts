@@ -1,5 +1,10 @@
 import { DocumentNode } from 'graphql'
-import { configureDigitallHostNames, DIGITALL, setSamlLoginProviderEnabled } from '../utils/samlLoginProvider'
+import {
+    configureDigitallHostNames,
+    DIGITALL,
+    requestUntil,
+    setSamlLoginProviderEnabled,
+} from '../utils/samlLoginProvider'
 
 describe('SAML Login Provider Settings', () => {
     // Site-level route: /administration/:site/<route key> (target administration-sites,
@@ -16,7 +21,26 @@ describe('SAML Login Provider Settings', () => {
     function resetConfig() {
         return cy.apollo({
             mutation: updateSamlLoginProviderConfig,
-            variables: { siteKey, fqdn: null },
+            // An omitted buttonLabel keeps the current one: reset it explicitly
+            variables: { siteKey, fqdn: null, buttonLabel: '' },
+        })
+    }
+
+    function readButtonLabel() {
+        return cy
+            .apollo({ query: getSamlLoginProviderConfig, variables: { siteKey } })
+            .its('data.samlLoginProvider.config.buttonLabel')
+    }
+
+    /** The sign-in button text on digitall's login page, once the saved value is in effect. */
+    function choicePageButtonShows(text: string) {
+        const button = (r: Cypress.Response<unknown>) =>
+            new DOMParser()
+                .parseFromString(r.body as string, 'text/html')
+                .querySelector('#googleLoginForm button')
+                ?.textContent?.trim() ?? ''
+        requestUntil({ url: `http://${DIGITALL.host}:8080/saml-login` }, (r) => button(r) === text).then((r) => {
+            expect(button(r), 'sign-in button on the login page').to.eq(text)
         })
     }
 
@@ -197,5 +221,51 @@ describe('SAML Login Provider Settings', () => {
             expect(hasError, 'mutation should refuse a host of another site').to.eq(true)
         })
         readFqdn().should('eq', '')
+    })
+
+    it('saves a custom sign-in button text and shows it on the site\'s login page', () => {
+        openSettings()
+        cy.get('#slp-button-label input').should('have.value', '').and('have.attr', 'placeholder', 'Sign in with Google')
+
+        cy.get('#slp-button-label input').type('  Sign in with Acme SSO ')
+        cy.contains('button', 'Save').click()
+
+        cy.contains('saved successfully').should('be.visible')
+        readButtonLabel().should('eq', 'Sign in with Acme SSO')
+        choicePageButtonShows('Sign in with Acme SSO')
+    })
+
+    it('restores the default text when the field is cleared', () => {
+        cy.apollo({ mutation: updateSamlLoginProviderConfig, variables: { siteKey, fqdn: null, buttonLabel: 'Temporary' } })
+        openSettings()
+        cy.get('#slp-button-label input').should('have.value', 'Temporary').clear()
+        cy.contains('button', 'Save').click()
+
+        cy.contains('saved successfully').should('be.visible')
+        readButtonLabel().should('eq', '')
+        choicePageButtonShows('Sign in with Google')
+    })
+
+    it('keeps the button text when a caller only updates the host list', () => {
+        cy.apollo({ mutation: updateSamlLoginProviderConfig, variables: { siteKey, fqdn: null, buttonLabel: 'Kept' } })
+
+        cy.apollo({ mutation: updateSamlLoginProviderConfig, variables: { siteKey, fqdn: DIGITALL.host } })
+
+        readButtonLabel().should('eq', 'Kept')
+    })
+
+    it('rejects a button text that is too long at the GraphQL mutation level', () => {
+        cy.apollo({
+            mutation: updateSamlLoginProviderConfig,
+            variables: { siteKey, fqdn: null, buttonLabel: 'x'.repeat(81) },
+        }).then((response: { message?: string; graphQLErrors?: unknown[]; networkError?: unknown }) => {
+            const hasError = Boolean(
+                (response.graphQLErrors && response.graphQLErrors.length > 0) ||
+                    response.networkError ||
+                    response.message,
+            )
+            expect(hasError, 'mutation should return an error for a too long button text').to.eq(true)
+        })
+        readButtonLabel().should('eq', '')
     })
 })

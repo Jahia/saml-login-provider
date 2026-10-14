@@ -65,6 +65,22 @@ class SamlLoginProviderQueryTest {
             assertThat(result.getFqdn()).isEqualTo("digitall.example.com");
             assertThat(result.getServerNames()).containsExactly("digitall.example.com", "www.digitall.example.com");
             assertThat(result.isSamlConfigured()).isTrue();
+            assertThat(result.getButtonLabel()).isEmpty();
+        }
+    }
+
+    @Test
+    void config_returnsTheSitesButtonLabel() {
+        when(store.hosts(SITE_KEY)).thenReturn(List.of());
+        when(store.buttonLabel(SITE_KEY)).thenReturn("Sign in with SSO");
+        when(resolver.serverNamesOf(SITE_KEY)).thenReturn(Set.of("digitall.example.com"));
+        try (MockedStatic<SamlLoginProviderPermissions> permissions = mockStatic(SamlLoginProviderPermissions.class);
+             MockedStatic<SamlLoginProviderServices> services = mockStatic(SamlLoginProviderServices.class)) {
+            services.when(SamlLoginProviderServices::siteHostsStore).thenReturn(store);
+            services.when(SamlLoginProviderServices::siteResolver).thenReturn(resolver);
+            services.when(SamlLoginProviderServices::samlSetup).thenReturn((SamlSetup) siteKey -> true);
+
+            assertThat(query.getConfig(SITE_KEY).getButtonLabel()).isEqualTo("Sign in with SSO");
         }
     }
 

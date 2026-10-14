@@ -4,6 +4,7 @@ query GetSamlLoginProviderConfig($siteKey: String!) {
             siteKey
             fqdn
             serverNames
+            buttonLabel
         }
     }
 }

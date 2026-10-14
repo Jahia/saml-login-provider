@@ -4,8 +4,10 @@ import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
+import org.jahia.community.modules.samlloginprovider.ButtonLabel;
 import org.jahia.community.modules.samlloginprovider.HostList;
 import org.jahia.community.modules.samlloginprovider.LoginSite;
+import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
 import org.jahia.community.modules.samlloginprovider.SiteResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +21,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Namespace container exposed as {@code Mutation.samlLoginProvider} — see
+ * Namespace container exposed as {@code Mutation.samlLoginProvider}: see
  * {@link SamlLoginProviderMutationExtension}.
  */
 @GraphQLName("SamlLoginProviderMutation")
@@ -37,7 +39,11 @@ public class SamlLoginProviderMutation {
             final String siteKey,
             @GraphQLName("fqdn")
             @GraphQLDescription("Comma-separated hosts, each the site's server name or one of its aliases (systemsite: also hosts no site declares)")
-            final String fqdn) {
+            final String fqdn,
+            @GraphQLName("buttonLabel")
+            @GraphQLDescription("Text of the login page's SAML sign-in button: omitted keeps the current one, empty restores "
+                    + "the default (translated) label. Plain text, at most " + ButtonLabel.MAX_LENGTH + " characters")
+            final String buttonLabel) {
         SamlLoginProviderPermissions.checkSiteAdmin(siteKey);
 
         // Do NOT echo the submitted value anywhere: it is untrusted input.
@@ -47,19 +53,30 @@ public class SamlLoginProviderMutation {
             throw new IllegalArgumentException("Invalid host list: enter comma-separated RFC 1123 hostnames, or leave it empty.");
         }
 
+        String requestedLabel = ButtonLabel.normalize(buttonLabel);
+        if (!ButtonLabel.isValid(requestedLabel)) {
+            LOGGER.warn("Rejected an invalid button label submitted for site {}", siteKey);
+            throw new IllegalArgumentException("Invalid button text: plain text of at most " + ButtonLabel.MAX_LENGTH
+                    + " characters, on one line.");
+        }
+
         SiteResolver resolver = SamlLoginProviderServices.siteResolver();
         Set<String> serverNames = resolver.serverNamesOf(siteKey);
         checkGovernedBy(resolver, siteKey, serverNames, hosts);
 
+        SiteHostsStore store = SamlLoginProviderServices.siteHostsStore();
+        // Omitted: keep the current text, so callers managing only the host list never reset it.
+        // null goes through: the store resolves it within its write, never from a stale read here.
         try {
-            SamlLoginProviderServices.siteHostsStore().save(siteKey, hosts);
+            store.save(siteKey, hosts, buttonLabel == null ? null : requestedLabel);
         } catch (IOException e) {
             // log the detail server-side, surface a generic GraphQL error to the caller
             LOGGER.error("Error storing the saml-login-provider configuration of site {}", siteKey, e);
             throw new IllegalStateException("Unable to store the SAML login configuration");
         }
+        String label = buttonLabel == null ? ButtonLabel.normalize(store.buttonLabel(siteKey)) : requestedLabel;
         return new GqlSamlLoginProviderConfig(siteKey, HostList.canonical(hosts), sorted(serverNames),
-                SamlLoginProviderServices.samlSetup().isConfigured(siteKey));
+                SamlLoginProviderServices.samlSetup().isConfigured(siteKey), label);
     }
 
     /**
