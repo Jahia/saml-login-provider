@@ -38,6 +38,17 @@ export const IDP = {
     metadataUrl: 'http://idp.jahia.test:8180/realms/jahia-saml/protocol/saml/descriptor',
 }
 
+/**
+ * Where a SAML login returns before its target: the login completes there, outside core's Shiro
+ * guard (see SamlLoginReturnFilter).
+ */
+export const RETURN_PATH = '/saml-login-return'
+
+/** The login hop returning to target, as the module puts it in a SAML redirect parameter. */
+export function returnHop(target: string): string {
+    return `${RETURN_PATH}?redirect=${encodeURIComponent(target)}`
+}
+
 const MODULE_ID = 'saml-login-provider'
 const SAML_CONNECT_PATH = '/home.connect.saml'
 const IDP_STARTUP_POLL = { attempts: 40, intervalMs: 3000 }

@@ -128,6 +128,37 @@ class SamlLoginPageFilterTest {
     }
 
     @Test
+    void doFilter_googleForm_returnsThroughTheLoginHop_credentialsFormDoesNot() throws Exception {
+        // A SAML login completes on the first request after the callback; on a Shiro-guarded target
+        // (/tools) core fails it, so the Google form returns through /saml-login-return first. The
+        // credentials form logs in within /cms/login itself and needs no hop.
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("/ctx", Locale.ENGLISH);
+        when(request.getParameter("redirect")).thenReturn("/ctx/tools");
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+
+        filter.doFilter(request, response, chain);
+
+        String page = body.toString();
+        assertThat(googleForm(page)).contains(
+                "name=\"redirect\" value=\"/ctx/saml-login-return?redirect=%2Fctx%2Ftools\"");
+        assertThat(page.substring(page.indexOf("<form id=\"loginForm\""), page.indexOf("<form id=\"googleLoginForm\"")))
+                .contains("name=\"redirect\" value=\"/ctx/tools\"");
+    }
+
+    @Test
+    void doFilter_noRedirect_googleFormLeavesItToTheValvesPostLoginPath() throws Exception {
+        // An empty hop would send the visitor home instead of the connector's postLoginPath
+        StringWriter body = new StringWriter();
+        givenBasicGetRequest("/ctx", Locale.ENGLISH);
+        when(response.getWriter()).thenReturn(new PrintWriter(body));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(googleForm(body.toString())).doesNotContain("name=\"redirect\"").doesNotContain("saml-login-return");
+    }
+
+    @Test
     void doFilter_absoluteRedirect_isRejectedAndOmitted() throws Exception {
         // Arrange
         StringWriter body = new StringWriter();

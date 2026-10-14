@@ -76,6 +76,13 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     /** Jahia logout servlet; honors a validated relative {@code redirect} parameter. */
     private static final String LOGOUT_SERVLET_PATH = "/cms/logout";
 
+    /**
+     * Where a SAML login returns before its target, served by {@link SamlLoginReturnFilter}: the
+     * first request after the callback completes the login, and on a Shiro-guarded target core fails
+     * it (see that filter).
+     */
+    public static final String RETURN_PATH = "/saml-login-return";
+
     /** Jahia's own login page, which some core paths redirect to directly (see {@link CmsLoginRedirectFilter}). */
     static final String CORE_LOGIN_PATH = "/cms/login";
 
@@ -149,7 +156,9 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
             separator = '&';
         }
         if (originalUrl != null) {
-            loginUrl.append(separator).append("redirect=").append(WebUtils.urlEncode(originalUrl));
+            // Only the SAML path needs the hop; the choice page wraps it for its own Google form
+            String target = connect ? returnHop(request.getContextPath(), originalUrl) : originalUrl;
+            loginUrl.append(separator).append("redirect=").append(WebUtils.urlEncode(target));
         }
         return loginUrl.toString();
     }
@@ -226,7 +235,13 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         return originalUrl.length() > MAX_REDIRECT_LENGTH ? null : originalUrl;
     }
 
-    private static boolean isSafeTarget(String target) {
+    /** The login hop returning to {@code target} (a path that already includes the context path). */
+    public static String returnHop(String contextPath, String target) {
+        return (contextPath == null ? "" : contextPath) + RETURN_PATH + "?redirect=" + WebUtils.urlEncode(target);
+    }
+
+    /** A plain relative path that is not a login endpoint: safe to send a visitor to. */
+    static boolean isSafeTarget(String target) {
         return target != null && target.length() <= MAX_REDIRECT_LENGTH
                 && target.startsWith("/") && !target.startsWith("//")
                 && SAFE_TARGET_CHARS.matcher(target).matches()
@@ -258,7 +273,8 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         if (parameterStart >= 0) {
             path = path.substring(0, parameterStart);
         }
-        return path.endsWith(".saml") || path.endsWith(CHOICE_LOGIN_PATH) || path.endsWith(CORE_LOGIN_PATH);
+        return path.endsWith(".saml") || path.endsWith(CHOICE_LOGIN_PATH) || path.endsWith(CORE_LOGIN_PATH)
+                || path.endsWith(RETURN_PATH);
     }
 
     /**

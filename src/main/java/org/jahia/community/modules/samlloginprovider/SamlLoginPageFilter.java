@@ -134,7 +134,9 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         tokens.put("__FIELD_ERROR_ATTRS__", fieldErrorAttrs(loginError));
         tokens.put("__SITE_FIELD__", siteField(request.getParameter("site")));
         tokens.put("__REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM, redirect));
-        tokens.put("__GOOGLE_REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM, redirect));
+        // The SAML login returns through the hop; the credentials form logs in within /cms/login itself
+        tokens.put("__GOOGLE_REDIRECT_FIELD__", hiddenField(REDIRECT_PARAM,
+                redirect.isEmpty() ? redirect : SamlLoginUrlProvider.returnHop(contextPath, redirect)));
         tokens.put("__GOOGLE_SITE_FIELD__", googleSiteField(request));
         tokens.put("__FAILURE_REDIRECT_FIELD__", hiddenField("failureRedirect", failureRedirect(contextPath, redirect)));
         tokens.put("__LABEL_TITLE__", loginError == null

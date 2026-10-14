@@ -91,6 +91,10 @@ the module acts, a visit to `/cms/login` goes on to the modified login page (or 
 a listed host), keeping that target. Credential posts and failed-login messages (`loginError`) still
 use the stock page.
 
+After a SAML login the visitor returns through `/saml-login-return`, a short hop where Jahia
+completes the login, before going on to the page they asked for: landing directly on a page core
+guards with Shiro (such as `/tools`) would otherwise fail with a server error on that first request.
+
 After a SAML login the user returns to the page they first asked for, also with an IdP on another
 site such as Google: the module sends the SAML valve's `redirect` cookie with `SameSite=None;
 Secure`, so the browser keeps it across the IdP's cross-site POST back to Jahia. This needs HTTPS

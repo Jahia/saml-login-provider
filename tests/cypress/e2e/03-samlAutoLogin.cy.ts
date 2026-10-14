@@ -3,6 +3,7 @@ import {
     IDP,
     locationOf,
     requestUntil,
+    RETURN_PATH,
     setSamlLoginProviderHosts,
     setUpDigitallForSaml,
 } from '../utils/samlLoginProvider'
@@ -56,15 +57,19 @@ describe('SAML auto login', () => {
     it('takes an unauthenticated visitor through the IdP login page and back to the page they asked for', () => {
         cy.clearAllCookies()
 
-        // Where the callback sends the visitor back: the page first asked for, to which Jahia adds
-        // ?site=. Watched as a request rather than read from cy.url()/cy.location(): right after
-        // the AUT comes back from the IdP's origin, Cypress intermittently yields [] for both.
+        // Where the visitor ends up: the page first asked for, after the module's login hop.
+        // Watched as a request rather than read from cy.url()/cy.location(): right after the AUT
+        // comes back from the IdP's origin, Cypress intermittently yields [] for both.
         const escapedSiteUrl = siteUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        cy.intercept({ method: 'GET', url: new RegExp(`^${escapedSiteUrl}${protectedPath}\\?site=`) }).as('landing')
+        cy.intercept({ method: 'GET', url: new RegExp(`^${escapedSiteUrl}${protectedPath}(\\?|$)`) }).as('landing')
 
         // The module must send this straight to the SAML connect endpoint, which auto-submits the
         // AuthnRequest to the IdP.
         cy.visit(`${siteUrl}${protectedPath}`, { failOnStatusCode: false })
+        // The same pattern sees this anonymous visit first (sent on to SAML); the landing comes next.
+        cy.wait('@landing').then(({ response }) => {
+            expect(response?.statusCode, 'anonymous visit sent on to SAML').to.be.oneOf([301, 302, 303])
+        })
 
         // The callback is serialized into the IdP origin: it can only see what is passed in args.
         cy.origin(idpUrl, { args: { user: samlUser, password: samlPassword } }, ({ user, password }) => {
@@ -74,8 +79,8 @@ describe('SAML auto login', () => {
             cy.get('#kc-login').click()
         })
 
-        // The IdP POSTs the signed assertion to /home.callback.saml, which returns the visitor to
-        // the URL they first asked for (carried as ?redirect=). Jahia answering that page with 403
+        // The IdP POSTs the signed assertion to /home.callback.saml, which returns the visitor through
+        // the module's login hop to the URL they first asked for (carried as ?redirect=). Jahia answering that page with 403
         // -- not with another redirect to the IdP -- means it saw a logged-in visitor, one who
         // simply is not an editor (/start is the edit-mode entry).
         cy.wait('@landing', { timeout: 30000 }).then(({ response }) => {
@@ -106,12 +111,17 @@ describe('SAML auto login', () => {
             )
             .then((callback) => {
                 expect(callback.status, 'callback answer').to.be.oneOf([302, 303])
-                expect(locationOf(callback), 'back to the page first asked for').to.include(protectedPath)
+                // Back through the module's login hop, where the login completes, then on
+                expect(locationOf(callback), 'callback answer').to.include(RETURN_PATH)
+                return cy.request({ url: new URL(locationOf(callback), siteUrl).href, followRedirect: false, failOnStatusCode: false })
+            })
+            .then((hop) => {
+                expect(locationOf(hop), 'back to the page first asked for').to.match(new RegExp(`${protectedPath}($|\\?)`))
                 // The callback only stores the authenticated profile in the session; Jahia's
-                // authentication valve turns it into a login on the NEXT request -- the redirect a
-                // browser follows. Skip it and the session stays anonymous.
+                // authentication valve turns it into a login on the NEXT request (the hop). Skip it
+                // and the session stays anonymous.
                 return cy.request({
-                    url: new URL(locationOf(callback), siteUrl).href,
+                    url: new URL(locationOf(hop), siteUrl).href,
                     followRedirect: false,
                     failOnStatusCode: false,
                 })
