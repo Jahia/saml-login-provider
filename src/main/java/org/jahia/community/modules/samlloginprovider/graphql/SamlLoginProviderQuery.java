@@ -11,7 +11,7 @@ import org.jahia.community.modules.samlloginprovider.SiteHostsStore;
 import java.util.List;
 
 /**
- * Namespace container exposed as {@code Query.samlLoginProvider} — see
+ * Namespace container exposed as {@code Query.samlLoginProvider}: see
  * {@link SamlLoginProviderQueryExtension}.
  */
 @GraphQLName("SamlLoginProviderQuery")

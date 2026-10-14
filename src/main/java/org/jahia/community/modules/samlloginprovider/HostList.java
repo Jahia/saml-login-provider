@@ -23,7 +23,7 @@ public final class HostList {
 
     /**
      * A single RFC 1123 label: 1-63 letters, digits or hyphens. A flat character
-     * class with a bounded quantifier — deliberately no nested quantifiers, so
+     * class with a bounded quantifier, deliberately no nested quantifiers, so
      * there is no catastrophic-backtracking / stack-overflow risk on hostile input.
      */
     private static final Pattern LABEL_PATTERN = Pattern.compile("[A-Za-z0-9-]{1,63}");

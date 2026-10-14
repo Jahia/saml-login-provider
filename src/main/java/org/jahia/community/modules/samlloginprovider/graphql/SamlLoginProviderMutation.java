@@ -21,7 +21,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Namespace container exposed as {@code Mutation.samlLoginProvider} — see
+ * Namespace container exposed as {@code Mutation.samlLoginProvider}: see
  * {@link SamlLoginProviderMutationExtension}.
  */
 @GraphQLName("SamlLoginProviderMutation")

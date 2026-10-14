@@ -20,7 +20,7 @@ class ButtonLabelTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "Sign in with SSO", "Se connecter avec Google", "Anmelden über SSO — ÄÖÜ", "日本語でログイン"})
+    @ValueSource(strings = {"", "Sign in with SSO", "Se connecter avec Google", "Anmelden über SSO · ÄÖÜ", "日本語でログイン"})
     void isValid_acceptsPlainText(String label) {
         assertThat(ButtonLabel.isValid(label)).isTrue();
     }

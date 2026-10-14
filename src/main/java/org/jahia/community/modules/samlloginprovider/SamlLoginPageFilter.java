@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
 
 /**
  * Serves {@code /saml-login}: a page visually identical to Jahia's standard
- * login page ({@code errors/error_401.jsp} — same CSS and markup) with an
+ * login page ({@code errors/error_401.jsp}: same CSS and markup) with an
  * additional "Sign in with Google" button that launches the SAML flow
  * ({@code /home.connect.saml}).
  *
@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  * <p>Form contract (mirrors the {@code ui:loginArea} tag): POST
  * {@code /cms/login} with {@code username}, {@code password},
  * {@code useCookie}, hidden {@code site}/{@code redirect} and a
- * {@code failureRedirect} pointing back to this page — failed logins return
+ * {@code failureRedirect} pointing back to this page: failed logins return
  * here with a {@code loginError} parameter (codes from {@code org.jahia.bin.Login}).
  */
 @Component(immediate = true, service = AbstractServletFilter.class)
@@ -149,7 +149,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         tokens.put("__FAILURE_REDIRECT_FIELD__", hiddenField("failureRedirect", failureRedirect(contextPath, redirect)));
         tokens.put("__LABEL_TITLE__", loginError == null
                 ? loginLabel
-                : label(locale, "label.loginErrorTitle", "Login — authentication failed"));
+                : label(locale, "label.loginErrorTitle", "Login: authentication failed"));
         tokens.put("__LABEL_USERNAME__", label(locale, "label.username", "Username"));
         tokens.put("__LABEL_PASSWORD__", label(locale, "label.password", "Password"));
         tokens.put("__LABEL_REMEMBERME__", label(locale, "label.rememberme", "Remember me"));
@@ -181,7 +181,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
     }
 
     /**
-     * Only relative same-host paths are accepted as post-login targets —
+     * Only relative same-host paths are accepted as post-login targets:
      * the same policy as {@code Login.isAuthorizedRedirect} for relative URLs.
      */
     private static String safeRelativeRedirect(String redirect) {
@@ -293,7 +293,7 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
             return escapeHtml(ResourceBundles.get("JahiaInternalResources", locale).getString(key));
         } catch (RuntimeException e) {
             // A missing key, a missing bundle, or a non-container unit-test run all fall back to
-            // the default label — a label must never break the login page — but record why.
+            // the default label (a label must never break the login page), but record why.
             LOGGER.debug("Falling back to default label for key '{}'", key, e);
             return escapeHtml(fallback);
         }

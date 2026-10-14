@@ -104,17 +104,17 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
     const [buttonLabelError, setButtonLabelError] = useState('');
     // Status is one of: null, 'saving', 'success', 'error', 'cancel'
     const [saveStatus, setSaveStatus] = useState(null);
-    // Becomes true once the config has loaded successfully at least once — used to tell an
+    // Becomes true once the config has loaded successfully at least once: used to tell an
     // initial-load failure (full-page error state) apart from a later background refetch
     // failure (which must not tear down an already-mounted, working form)
     const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
     const [refetchFailed, setRefetchFailed] = useState(false);
 
-    // Update page title for the SPA route — the setting is per site, so the site tells
+    // Update page title for the SPA route. The setting is per site, so the site tells
     // multiple open tabs apart.
     useEffect(() => {
         const prev = document.title;
-        document.title = `SAML auto-login — ${siteKey} — Jahia Administration`;
+        document.title = `SAML auto-login | ${siteKey} | Jahia Administration`;
         return () => {
             document.title = prev;
         };
@@ -144,7 +144,7 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
     }, [configData]);
 
     // A background refetch (triggered by the mutation's refetchQueries) failing after the form
-    // is already mounted must not replace the whole form with the full-page error state — only
+    // is already mounted must not replace the whole form with the full-page error state; only
     // an error on the very first load does that (see the early-return branches below).
     useEffect(() => {
         if (configError && hasLoadedOnce) {
@@ -223,7 +223,7 @@ export const SamlLoginProviderSettings = ({siteKey}) => {
 
     return (
         <div>
-            {/* Two fixed-role live regions always in DOM — AT registers roles at mount, never mutate role post-mount */}
+            {/* Two fixed-role live regions always in DOM: AT registers roles at mount, never mutate role post-mount */}
             <div role="status" aria-live="polite" aria-atomic="true" className={styles.slp_sr_only}>
                 {saveStatus === 'success' ? t('samlLoginProvider.success.update') : saveStatus === 'cancel' ? t('samlLoginProvider.cancel') : ''}
             </div>

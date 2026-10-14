@@ -26,7 +26,7 @@ import java.util.regex.Pattern;
  * <li>On a 401, {@code ErrorServlet} redirects to {@link #getLoginUrl}. The
  * provider appends {@code redirect=<encoded original URL>} itself because
  * core only does so when the request went through the Render servlet
- * (a {@code urlResolver} request attribute is present) — vanity/rewritten or
+ * (a {@code urlResolver} request attribute is present): vanity/rewritten or
  * non-render URLs would otherwise lose their return target and land on the
  * SAML valve's default {@code postLoginPath}. When core does append its own
  * {@code &redirect=...} too, the duplicate is harmless: the valve reads the
@@ -39,7 +39,7 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>The connect endpoint resolves the site from the {@code siteKey} request
- * parameter, falling back to server-name resolution — no parameter is needed
+ * parameter, falling back to server-name resolution: no parameter is needed
  * as long as the virtual host (e.g. edit.jahia.com) is declared on the site.
  *
  * <p><strong>Per-site behavior (fail-safe by default):</strong> a request is routed by the site its
@@ -140,7 +140,7 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     private String loginUrl(HttpServletRequest request, String originalUrl) {
         Route route = route(request);
         if (route.destination == Destination.INACTIVE) {
-            // fail-safe default: null is load-bearing — LoginConfig filters
+            // fail-safe default: null is load-bearing: LoginConfig filters
             // blank results and falls back to the standard /cms/login page
             return null;
         }
@@ -182,7 +182,7 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         }
         // Send the user to a public landing page after logout. The default
         // behavior (redirect to referer) would hit a protected page, return a
-        // 401 and silently re-login through SAML — logout would appear broken.
+        // 401 and silently re-login through SAML, and logout would appear broken.
         String contextPath = request.getContextPath();
         return contextPath + LOGOUT_SERVLET_PATH + "?redirect=" + WebUtils.urlEncode(contextPath + "/");
     }
@@ -197,19 +197,19 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
      * send them back there after authentication. Resolution order:
      * <ol>
      * <li>error dispatch (401 page): {@code javax.servlet.error.request_uri}
-     * — request paths are restored to the original by the container. The
+     * (the container restores request paths to the original). The
      * query string comes from {@code getQueryString()}: the Servlet spec
      * defines no {@code javax.servlet.error.query_string} attribute, and
      * Tomcat (the only container Jahia ships on) restores the original query
-     * string during error dispatch — core's own ErrorServlet relies on the
+     * string during error dispatch, and core's own ErrorServlet relies on the
      * same behavior;</li>
-     * <li>url-rewrite forward: {@code javax.servlet.forward.request_uri} —
+     * <li>url-rewrite forward: {@code javax.servlet.forward.request_uri}:
      * the pretty URL the browser sent, not the rewritten /cms/... one, with
      * the query from {@code javax.servlet.forward.query_string};</li>
      * <li>plain request: current URI and query string.</li>
      * </ol>
-     * Returns {@code null} (no redirect parameter) for SAML endpoints — they
-     * must never become a post-login target — and for oversized URLs.
+     * Returns {@code null} (no redirect parameter) for SAML endpoints (they
+     * must never become a post-login target) and for oversized URLs.
      */
     private static String resolveOriginalUrl(HttpServletRequest request) {
         String uri = (String) request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI);
