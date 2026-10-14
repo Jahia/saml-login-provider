@@ -80,7 +80,7 @@ class SamlLoginUrlProviderTest {
             }
 
             @Override
-            public void save(String siteKey, List<String> hosts) {
+            public void save(String siteKey, List<String> hosts, String buttonLabel) {
                 throw new UnsupportedOperationException();
             }
         };
@@ -263,7 +263,7 @@ class SamlLoginUrlProviderTest {
             }
 
             @Override
-            public void save(String siteKey, List<String> hosts) {
+            public void save(String siteKey, List<String> hosts, String buttonLabel) {
                 throw new UnsupportedOperationException();
             }
         }, new SiteResolver() {

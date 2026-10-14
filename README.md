@@ -20,6 +20,9 @@ site**, from a React screen in each site's administration, backed by GraphQL.
 - Fill in the comma-separated list of **this site's** hosts that should go straight to SAML login.
   The screen shows the hosts the site answers on (its server name and aliases, set in the site's
   settings); only those are accepted
+- Optionally set the **Sign-in button text**: the label of the SAML button on this site's login
+  page (plain text, at most 80 characters). Leave it empty for the default "Sign in with Google",
+  shown in each visitor's language; a custom text is the same in every language
 - Leave the list empty to send nobody straight to SAML: every host of the site then gets the
   choice login page (see [Behavior](#behavior))
 - Click **Save**
@@ -30,7 +33,9 @@ listed, and keeps the standard login: Jahia would serve it from an arbitrary one
 Each site has its own list, and a list only ever applies to requests for its own site: a request
 is matched to the site its host resolves to — the same lookup the SAML connect endpoint uses — and
 only that site's list is consulted. The lists are stored as
-`karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, one file per configured site.
+`karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, one file per configured site
+(`fqdn` for the hosts, `buttonLabel` for the button text, URL-encoded in UTF-8 — when editing the
+file by hand, plain text works too, with `+` read as a space).
 A saved list takes effect within a second; enabling the module on a site or changing a site's
 server names takes up to about 5 seconds to be picked up.
 
@@ -132,6 +137,7 @@ query {
       fqdn
       serverNames
       samlConfigured
+      buttonLabel
     }
   }
 }
@@ -139,8 +145,9 @@ query {
 # Update a site's configuration (empty fqdn turns it off for that site)
 mutation {
   samlLoginProvider {
-    update(siteKey: "digitall", fqdn: "www.digitall.com") {
+    update(siteKey: "digitall", fqdn: "www.digitall.com", buttonLabel: "Sign in with Acme SSO") {
       fqdn
+      buttonLabel
     }
   }
 }
@@ -151,3 +158,4 @@ mutation {
 site has an enabled SAML connector (without one the module leaves the site's login alone). `update`
 rejects any host that is not the site's server name or one of its aliases, and any host also
 declared by another site; for systemsite it also accepts hosts that no site declares.
+`buttonLabel` is optional: omitted keeps the current text, `""` restores the default.

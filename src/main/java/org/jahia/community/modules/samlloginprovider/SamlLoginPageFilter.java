@@ -65,9 +65,17 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
      */
     private SiteResolver siteResolver;
 
+    /** Same publication as {@link #siteResolver}; {@code null} only in tests -- then the default label. */
+    private SiteHostsStore siteHostsStore;
+
     @Reference
     public void setSiteResolver(SiteResolver siteResolver) {
         this.siteResolver = siteResolver;
+    }
+
+    @Reference
+    public void setSiteHostsStore(SiteHostsStore siteHostsStore) {
+        this.siteHostsStore = siteHostsStore;
     }
 
     @Activate
@@ -147,7 +155,10 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
         tokens.put("__LABEL_REMEMBERME__", label(locale, "label.rememberme", "Remember me"));
         tokens.put("__LABEL_LOGIN__", loginLabel);
         tokens.put("__LABEL_OR__", label(locale, "label.or", "or"));
-        tokens.put("__LABEL_GOOGLE__", label(locale, "label.samlLogin", "Sign in with Google"));
+        String customLabel = customButtonLabel(request);
+        tokens.put("__LABEL_GOOGLE__", customLabel.isEmpty()
+                ? label(locale, "label.samlLogin", "Sign in with Google")
+                : escapeHtml(customLabel));
 
         return substitute(template, tokens);
     }
@@ -250,6 +261,21 @@ public class SamlLoginPageFilter extends AbstractServletFilter {
             return site != null && site.isFallback() ? hiddenField("siteKey", site.siteKey()) : "";
         } catch (RuntimeException e) {
             LOGGER.warn("Could not resolve the login site of host {}; letting the valve resolve it", serverName, e);
+            return "";
+        }
+    }
+
+    /** The governing site's button text (see {@link LoginSite}); empty = the translated default. */
+    private String customButtonLabel(HttpServletRequest request) {
+        String serverName = request.getServerName();
+        if (siteResolver == null || siteHostsStore == null || serverName == null) {
+            return "";
+        }
+        try {
+            LoginSite site = LoginSite.of(siteResolver, serverName.toLowerCase(Locale.ROOT));
+            return site == null ? "" : ButtonLabel.normalize(siteHostsStore.buttonLabel(site.siteKey()));
+        } catch (RuntimeException e) {
+            LOGGER.warn("Could not read the sign-in button text for host {}; using the default", serverName, e);
             return "";
         }
     }

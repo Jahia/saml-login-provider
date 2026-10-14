@@ -16,7 +16,7 @@ the module is enabled).
   site has SAML set up is read from jahia-authentication's `SettingsService`)
 - Configuration stored as one file-backed OSGi **factory** configuration per site
   (`karaf/etc/org.jahia.community.samlloginprovider.site-<siteKey>.cfg`, properties `siteKey`,
-  `fqdn`), not JCR — see `FileSiteHostsStore`
+  `fqdn`, `buttonLabel`), not JCR — see `FileSiteHostsStore`
 - Fail-safe default: a site where the module is not enabled, a site with no SAML connector, and a
   host declared by several sites all keep Jahia's stock login; so does a host no site declares
   unless systemsite qualifies
@@ -34,6 +34,7 @@ the module is enabled).
 | `SiteHostsStore` / `FileSiteHostsStore` | Per-site host lists; the file-backed `ManagedServiceFactory` (factory PID `org.jahia.community.samlloginprovider.site`) that reads and atomically writes one `.cfg` per site |
 | `SiteResolver` / `JahiaSiteResolver` | Host → the ONE site declaring it, whether no site declares it (`isUnclaimed`), site → its server names and whether the module is enabled on it. Reads every site through a system session; the routing index is cached 5 s, validation reads are fresh |
 | `LoginSite` | The site governing a host's login: its own unique site, `systemsite` (fallback) when no site declares it, none when several do. Shared by the provider and the filter |
+| `ButtonLabel` | A site's custom SAML sign-in button text: normalization (trim), validation (≤ 80 UTF-16 units, no control/line-separator chars) and its URL-encoded `.cfg` form |
 | `HostList` | Parsing/validation of the comma-separated `fqdn` host list |
 | `WebUtils` | Shared URL-encoding and site-key validation helpers |
 | `SamlLoginProviderQueryExtension` / `MutationExtension` | Publish the single `samlLoginProvider` namespace field on `DXGraphQLProvider.Query` / `Mutation` |
@@ -41,7 +42,7 @@ the module is enabled).
 | `SamlLoginProviderQuery` / `SamlLoginProviderMutation` | Namespace containers holding the actual `config` / `update` operations |
 | `SamlLoginProviderPermissions` | Site-admin permission gate shared by both containers (checks the site node) |
 | `SamlLoginProviderServices` | OSGi lookups for the GraphQL containers (instantiated by graphql-java, so no injection) |
-| `GqlSamlLoginProviderConfig` | GraphQL return type (`{siteKey, fqdn, serverNames, samlConfigured}`) |
+| `GqlSamlLoginProviderConfig` | GraphQL return type (`{siteKey, fqdn, serverNames, samlConfigured, buttonLabel}`) |
 
 ## GraphQL API
 
@@ -51,8 +52,8 @@ avoiding cross-module field name collisions in the platform-wide GraphQL schema.
 
 | Operation | Name | Notes |
 |-----------|------|-------|
-| Query | `samlLoginProvider { config(siteKey: String!) }` → `GqlSamlLoginProviderConfig` | The site's list, its `serverNames`, and `samlConfigured` (enabled SAML connector) |
-| Mutation | `samlLoginProvider { update(siteKey: String!, fqdn) }` → `GqlSamlLoginProviderConfig` | Empty/null `fqdn`: nobody goes straight to SAML (the site's hosts get the choice page). Every host must be the site's server name or an alias, declared by no other site; systemsite may also list hosts no site declares |
+| Query | `samlLoginProvider { config(siteKey: String!) }` → `GqlSamlLoginProviderConfig` | The site's list, its `serverNames`, `samlConfigured` (enabled SAML connector) and `buttonLabel` (empty = default) |
+| Mutation | `samlLoginProvider { update(siteKey: String!, fqdn, buttonLabel) }` → `GqlSamlLoginProviderConfig` | `buttonLabel` omitted keeps the current text, `""` restores the default. Empty/null `fqdn`: nobody goes straight to SAML (the site's hosts get the choice page). Every host must be the site's server name or an alias, declared by no other site; systemsite may also list hosts no site declares |
 
 Permission: `siteAdminSamlLoginProvider` — a **site-level** permission (declared under
 `site-admin` in `permissions.xml`), checked via `callerSession.getNode("/sites/<siteKey>")
@@ -149,6 +150,13 @@ yarn install
   to the next request rather than whenever FileInstall polls. The module ships no default `.cfg`.
 - `LogoutConfig` (core) only ever consults the **first** bound `LogoutUrlProvider` — this module
   assumes it is the only one deployed; do not silently rely on multiple providers cooperating.
+- **`buttonLabel` is stored URL-encoded, never raw.** Felix FileInstall reads `.cfg` values as typed
+  properties: a leading `[` is an array, `"` starts a quoted token, `${...}` is interpolated. A raw
+  free-text label could be misread or break the whole file, host list included. `ButtonLabel.encode`
+  emits only `[A-Za-z0-9%+._*-]`; a bad label in a hand-edited file rejects the whole update, like a
+  bad host. The file is deleted only when the site has neither hosts nor a label. The choice page
+  takes the label of the site governing the host (`LoginSite`, so systemsite for the editing host)
+  and HTML-escapes it; any failure falls back to the translated default.
 - **Core's Shiro guard bypasses `LoginUrlProvider`.** `/tools/**`, `/modules/tools/**`,
   `/modules/**/*.jsp`, `*.raw`, `/cms/serverStats` are protected by Shiro (`applicationcontext-security.xml`
   in jahia-impl, `loginUrl` hard-wired to `/cms/login`); `JahiaAuthenticationFilter.redirectToLogin`
