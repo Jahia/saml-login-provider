@@ -202,7 +202,7 @@ class SamlLoginUrlProviderTest {
 
         // Act / Assert
         assertThat(provider.getLoginUrl(request))
-                .isEqualTo("/ctx/home.connect.saml?siteKey=systemsite&redirect=%2Fstart");
+                .isEqualTo("/ctx/home.connect.saml?siteKey=systemsite&redirect=%2Fctx%2Fsaml-login-return%3Fredirect%3D%252Fstart");
         assertThat(provider.getLogoutUrl(request)).isEqualTo("/ctx/cms/logout?redirect=%2Fctx%2F");
     }
 
@@ -314,7 +314,7 @@ class SamlLoginUrlProviderTest {
         String loginUrl = provider.getLoginUrl(request);
 
         // Assert
-        assertThat(loginUrl).isEqualTo("/home.connect.saml?redirect=%2Fprotected%2Fpage%3Fa%3D1%26b%3D2");
+        assertThat(loginUrl).isEqualTo("/home.connect.saml?redirect=%2Fsaml-login-return%3Fredirect%3D%252Fprotected%252Fpage%253Fa%253D1%2526b%253D2");
     }
 
     @Test
@@ -331,13 +331,13 @@ class SamlLoginUrlProviderTest {
         String loginUrl = provider.getLoginUrl(request);
 
         // Assert
-        assertThat(loginUrl).isEqualTo("/home.connect.saml?redirect=%2Fpretty%2Furl%3Fq%3D1");
+        assertThat(loginUrl).isEqualTo("/home.connect.saml?redirect=%2Fsaml-login-return%3Fredirect%3D%252Fpretty%252Furl%253Fq%253D1");
     }
 
     static Stream<Arguments> plainRequestCases() {
         return Stream.of(
                 // plain request: redirect is the encoded original URI + query
-                Arguments.of("/plain/url", "z=9", "/home.connect.saml?redirect=%2Fplain%2Furl%3Fz%3D9"),
+                Arguments.of("/plain/url", "z=9", "/home.connect.saml?redirect=%2Fsaml-login-return%3Fredirect%3D%252Fplain%252Furl%253Fz%253D9"),
                 // loop guard: original URL ends in ".saml" -> no redirect appended
                 Arguments.of("/home.connect.saml", null, "/home.connect.saml"),
                 // loop guard: original URL ends in the choice-login path -> no redirect appended
@@ -432,14 +432,15 @@ class SamlLoginUrlProviderTest {
         when(request.getContextPath()).thenReturn("/ctx");
 
         assertThat(provider.loginUrlFor(request, "/modules/tools/index.jsp?x=1"))
-                .isEqualTo("/ctx/home.connect.saml?siteKey=systemsite&redirect=%2Fmodules%2Ftools%2Findex.jsp%3Fx%3D1");
+                .isEqualTo("/ctx/home.connect.saml?siteKey=systemsite&redirect=%2Fctx%2Fsaml-login-return%3Fredirect%3D%252Fmodules%252Ftools%252Findex.jsp%253Fx%253D1");
     }
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {
             "//evil.example.com/x", "https://evil.example.com/", "evil", "/\\evil.example.com", "/a\nb",
             "/saml-login", "/home.connect.saml", "/cms/login", "/cms/login;jsessionid=X", "",
-            "/cms/./login", "/cms//login", "/cms/x/../login", "/cms/login#x", "/saml-login#x", "/a/.."})
+            "/cms/./login", "/cms//login", "/cms/x/../login", "/cms/login#x", "/saml-login#x", "/a/..",
+            "/saml-login-return", "/saml-login-return?redirect=%2Ftools"})
     void loginUrlFor_unsafeOrLoopingTarget_isDropped(String target) {
         // Never an open-redirect hop, and never a login page as the post-login target (loop)
         hostsBySite.put(SITE, List.of(LISTED_HOST));
@@ -463,6 +464,22 @@ class SamlLoginUrlProviderTest {
         when(request.getContextPath()).thenReturn("");
 
         assertThat(provider.loginUrlFor(request, "/" + "a".repeat(2048))).isEqualTo("/saml-login");
+    }
+
+    @Test
+    void loginUrlFor_choicePage_keepsThePlainTarget() {
+        // The choice page wraps it for its Google form only (the credentials form needs no hop)
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
+        when(request.getContextPath()).thenReturn("/ctx");
+
+        assertThat(provider.loginUrlFor(request, "/ctx/tools")).isEqualTo("/ctx/saml-login?redirect=%2Fctx%2Ftools");
+    }
+
+    @Test
+    void returnHop_wrapsTheTargetInTheLoginHop() {
+        assertThat(SamlLoginUrlProvider.returnHop("/ctx", "/ctx/tools?a=1"))
+                .isEqualTo("/ctx/saml-login-return?redirect=%2Fctx%2Ftools%3Fa%3D1");
+        assertThat(SamlLoginUrlProvider.returnHop("", "/start")).isEqualTo("/saml-login-return?redirect=%2Fstart");
     }
 
     @Test

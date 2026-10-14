@@ -29,6 +29,7 @@ the module is enabled).
 | `SamlSetup` / `JahiaAuthSamlSetup` | Whether a site has an enabled SAML connector (`SettingsService.getConnectorConfig(site, "Saml")`, property `enabled`) |
 | `SamlLoginPageFilter` | Serves `/saml-login` (credentials form + "Sign in with Google") |
 | `CmsLoginRedirectFilter` | On `/cms/*`, for a plain `GET`/`HEAD` of `/cms/login` (path parameters stripped, no `loginError`/`username`/`restMode`/`redirectActive`): redirects to `SamlLoginUrlProvider.loginUrlFor(request, redirect)` where the provider acts. Covers core's Shiro-guarded paths, which never reach the provider |
+| `SamlLoginReturnFilter` | Serves `/saml-login-return?redirect=<target>` at order 0 (after core's `JcrSessionFilter`, -1): the SAML login completes there, then the visitor goes on to the validated target. SAML redirects (connect URL, choice page's Google form) go through it |
 | `SamlRedirectCookieFilter` | On the valve's connect endpoint (registered as `*.saml` — Jahia matches `*.<ext>` on the last dot only — then filtered on the `connect.saml` suffix), just before the valve's `SAML2Filter`: writes the valve's `redirect` cookie with `SameSite=None; Secure`, so a cross-site IdP (Google) does not lose the post-login target |
 | `SiteHostsStore` / `FileSiteHostsStore` | Per-site host lists; the file-backed `ManagedServiceFactory` (factory PID `org.jahia.community.samlloginprovider.site`) that reads and atomically writes one `.cfg` per site |
 | `SiteResolver` / `JahiaSiteResolver` | Host → the ONE site declaring it, whether no site declares it (`isUnclaimed`), site → its server names and whether the module is enabled on it. Reads every site through a system session; the routing index is cached 5 s, validation reads are fresh |
@@ -156,6 +157,18 @@ yarn install
   `/cms/login` end. The incoming `redirect` is untrusted: `loginUrlFor` keeps only a plain relative
   path (printable ASCII, no `\`, not `//`) and drops login endpoints, now including `/cms/login`
   (loop). The provider is also published as `SamlLoginUrlProvider` for this filter to reference.
+- **A SAML login must not complete on a Shiro-guarded URL** (core bug). The valve's callback only
+  stores the profile; the next request completes the login, and the auth pipeline then flags the
+  session for invalidation. On `/tools` etc. Shiro (order -3) runs that pipeline itself
+  (`JahiaAuthenticationFilter.onAccessDenied`), invalidates the session, then `executeLogin`s a
+  subject bound to the dead session: `InvalidSessionException`, a 500 until reload. Elsewhere
+  `JcrSessionFilter` (-1) handles it fine. So SAML targets are wrapped by
+  `SamlLoginUrlProvider.returnHop`: `/saml-login-return?redirect=<target>`, served at order 0. The
+  credentials form needs no hop (it logs in within `/cms/login`). The hop must not use
+  `encodeRedirectURL`: Shiro rejects `;jsessionid=` on its paths (`blockSemicolon`). The hop path
+  is part of the loop guard. With no target the Google form carries no `redirect` at all (the valve
+  then uses `postLoginPath`); an empty hop would send visitors home. The valve's `&site=<key>` now
+  lands on the hop URL and is not carried on to the target.
 - **Cross-site IdPs lose the post-login target without `SamlRedirectCookieFilter`.** The valve
   (4.1.1, `SAML2Util.storeAuthenticationContext`) keeps the validated `redirect` parameter in a
   `redirect` cookie with no `SameSite`, read back at the callback, else falls back to the

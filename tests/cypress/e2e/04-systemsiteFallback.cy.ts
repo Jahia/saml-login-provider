@@ -2,6 +2,8 @@ import {
     EDIT_HOST,
     locationOf,
     requestUntil,
+    RETURN_PATH,
+    returnHop,
     setSamlLoginProviderEnabled,
     setSamlLoginProviderHosts,
     setUpSystemsiteForSaml,
@@ -23,6 +25,29 @@ describe('Fallback to systemsite for a host no site declares', () => {
     const samlPassword = randomSecret()
 
     const anonymousStart = () => ({ url: `${editUrl}${protectedPath}` })
+
+    interface Hop {
+        url: string
+        status: number
+        location?: string
+    }
+
+    /** Follow a redirect chain by hand from a non-followed response, recording every hop. */
+    const followRedirects = (first: Cypress.Response<unknown>, base: string, maxHops = 8) => {
+        const chain: Hop[] = []
+        const step = (response: Cypress.Response<unknown>, url: string, hops: number): Cypress.Chainable<Hop[]> => {
+            const location = locationOf(response)
+            chain.push({ url, status: response.status, location })
+            if (!location || response.status < 300 || response.status >= 400 || hops >= maxHops) {
+                return cy.wrap(chain, { log: false })
+            }
+            const next = new URL(location, url).href
+            return cy
+                .request({ url: next, followRedirect: false, failOnStatusCode: false })
+                .then((r) => step(r, next, hops + 1))
+        }
+        return step(first, `${base}/home.callback.saml`, 0)
+    }
 
     /** Anonymous /tools: core's redirect to /cms/login, then where that page sends the visitor. */
     const toolsLoginHop = () =>
@@ -113,14 +138,39 @@ describe('Fallback to systemsite for a host no site declares', () => {
 
         requestUntil(anonymousStart(), (r) => locationOf(r).includes(samlConnectPath)).then((response) => {
             expect(locationOf(response), 'SAML connect for systemsite').to.include(
-                `${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent(protectedPath)}`,
+                `${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent(returnHop(protectedPath))}`,
             )
         })
         toolsLoginHop().then((login) => {
             expect(locationOf(login), '/tools straight to SAML too').to.include(
-                `${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent('/tools')}`,
+                `${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent(returnHop('/tools'))}`,
             )
         })
+    })
+
+    it('lands on /tools after a SAML login, without core failing the first request', () => {
+        // The first request after the callback completes the login. On /tools, core's Shiro filter
+        // runs that login itself and fails on the session it just invalidated
+        // (InvalidSessionException, a 500) -- so the module returns visitors through a hop that
+        // completes it the normal way first.
+        cy.clearAllCookies()
+        const acsUrl = new RegExp(`^${editUrl}/home\\.callback\\.saml\\?siteKey=${siteKey}(&|$)`)
+
+        toolsLoginHop()
+            .then((login) => {
+                expect(locationOf(login), 'straight to SAML from /tools').to.include(samlConnectPath)
+                return cy.request(new URL(locationOf(login), editUrl).href)
+            })
+            .then((connect) => loginThroughIdp(connect, editUrl, samlPassword, acsUrl))
+            .then((callback) => followRedirects(callback, editUrl))
+            .then((chain) => {
+                const seen = chain.map((hop) => `${hop.status} ${hop.url}`).join(' -> ')
+                expect(chain.filter((hop) => hop.status >= 500), `no server error: ${seen}`).to.be.empty
+                const tools = chain.find((hop) => new URL(hop.url).pathname === '/tools')
+                expect(tools, `/tools reached: ${seen}`).to.not.be.undefined
+                // Logged in now: not sent to log in again (saml.tester may lack the tools permission)
+                expect(tools?.location ?? '', `/tools answer: ${seen}`).to.not.match(/\/cms\/login|\.saml/)
+            })
     })
 
     it("opens a Jahia session through systemsite's connector", () => {
@@ -132,11 +182,17 @@ describe('Fallback to systemsite for a host no site declares', () => {
             .then((connect) => loginThroughIdp(connect, editUrl, samlPassword, acsUrl))
             .then((callback) => {
                 expect(callback.status, 'callback answer').to.be.oneOf([302, 303])
-                expect(locationOf(callback), 'back to the page first asked for').to.include(protectedPath)
-                // Jahia's authentication valve turns the stored profile into a login on the NEXT
-                // request -- the redirect a browser follows.
+                // Back through the module's login hop, where the login completes, then on
+                expect(locationOf(callback), 'callback answer').to.include(RETURN_PATH)
+                return cy.request({ url: new URL(locationOf(callback), editUrl).href, followRedirect: false, failOnStatusCode: false })
+            })
+            .then((hop) => {
+                expect(locationOf(hop), 'back to the page first asked for').to.match(new RegExp(`${protectedPath}($|\\?)`))
+                // The callback only stores the authenticated profile in the session; Jahia's
+                // authentication valve turns it into a login on the NEXT request (the hop). Skip it
+                // and the session stays anonymous.
                 return cy.request({
-                    url: new URL(locationOf(callback), editUrl).href,
+                    url: new URL(locationOf(hop), editUrl).href,
                     followRedirect: false,
                     failOnStatusCode: false,
                 })
