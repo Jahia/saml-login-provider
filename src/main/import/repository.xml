@@ -4,7 +4,7 @@
         <saml-login-provider j:dependencies="default"
                              j:modulePriority="0"
                              j:moduleType="module"
-                             j:title="Jahia SAML Login/Logout URL Provider"
+                             j:title="SAML Login Provider"
                              jcr:primaryType="jnt:module">
 
             <portlets jcr:primaryType="jnt:portletFolder"/>
