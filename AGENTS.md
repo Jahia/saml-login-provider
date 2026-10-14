@@ -28,6 +28,7 @@ the module is enabled).
 | `SamlLoginUrlProvider` | `LoginUrlProvider`/`LogoutUrlProvider` OSGi services; routes by the site the host resolves to, only where the module is enabled and SAML is set up |
 | `SamlSetup` / `JahiaAuthSamlSetup` | Whether a site has an enabled SAML connector (`SettingsService.getConnectorConfig(site, "Saml")`, property `enabled`) |
 | `SamlLoginPageFilter` | Serves `/saml-login` (credentials form + "Sign in with Google") |
+| `SamlRedirectCookieFilter` | On the valve's connect endpoint (registered as `*.saml` — Jahia matches `*.<ext>` on the last dot only — then filtered on the `connect.saml` suffix), just before the valve's `SAML2Filter`: writes the valve's `redirect` cookie with `SameSite=None; Secure`, so a cross-site IdP (Google) does not lose the post-login target |
 | `SiteHostsStore` / `FileSiteHostsStore` | Per-site host lists; the file-backed `ManagedServiceFactory` (factory PID `org.jahia.community.samlloginprovider.site`) that reads and atomically writes one `.cfg` per site |
 | `SiteResolver` / `JahiaSiteResolver` | Host → the ONE site declaring it, whether no site declares it (`isUnclaimed`), site → its server names and whether the module is enabled on it. Reads every site through a system session; the routing index is cached 5 s, validation reads are fresh |
 | `LoginSite` | The site governing a host's login: its own unique site, `systemsite` (fallback) when no site declares it, none when several do. Shared by the provider and the filter |
@@ -146,6 +147,15 @@ yarn install
   to the next request rather than whenever FileInstall polls. The module ships no default `.cfg`.
 - `LogoutConfig` (core) only ever consults the **first** bound `LogoutUrlProvider` — this module
   assumes it is the only one deployed; do not silently rely on multiple providers cooperating.
+- **Cross-site IdPs lose the post-login target without `SamlRedirectCookieFilter`.** The valve
+  (4.1.1, `SAML2Util.storeAuthenticationContext`) keeps the validated `redirect` parameter in a
+  `redirect` cookie with no `SameSite`, read back at the callback, else falls back to the
+  connector's `postLoginPath` (+ `?site=<siteKey>`). Browsers treat it as `Lax` and do not send it
+  on the IdP's cross-site POST. The filter writes that one cookie itself as `SameSite=None; Secure`,
+  only over HTTPS (`isSecure()` or `X-Forwarded-Proto: https`) and only for RFC 6265-safe values;
+  otherwise it delegates unchanged. It must stay ordered before the valve (`-5.45` < `-5.4`;
+  Jahia sorts filters ascending), and its pattern must stay `*.saml`: `*.connect.saml` never matches.
+  CI cannot show the browser side (http, same-site Keycloak); spec 04 checks the header instead.
 - `resolveOriginalUrl` must keep returning `null` for `.saml`/`/saml-login` suffixed URLs — otherwise
   the choice page or the SAML endpoint itself could become a post-login redirect target (loop).
 - **Login lockout risk**: routing requires an *enabled* connector (`SamlSetup`), so a listed host is

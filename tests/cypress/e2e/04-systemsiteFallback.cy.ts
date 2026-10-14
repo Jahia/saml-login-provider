@@ -58,6 +58,29 @@ describe('Fallback to systemsite for a host no site declares', () => {
         })
     })
 
+    it('keeps the page asked for across a cross-site IdP, by sending the redirect cookie with SameSite=None', () => {
+        // The valve keeps the post-login target in a "redirect" cookie and reads it back when the IdP
+        // POSTs to the callback. From an IdP on another site (Google), browsers only send it with
+        // SameSite=None -- which in turn needs Secure, so this asks as if through a TLS proxy.
+        // (The browser side cannot be shown here: CI runs on http, and its IdP shares jahia.test.)
+        const connect = `${editUrl}${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent(protectedPath)}`
+        const redirectCookie = (r: Cypress.Response<unknown>) =>
+            ([].concat(r.headers['set-cookie'] ?? []) as string[]).find((c) => c.startsWith('redirect=')) ?? ''
+
+        cy.request({ url: connect, headers: { 'X-Forwarded-Proto': 'https' } }).then((response) => {
+            expect(redirectCookie(response), 'redirect cookie behind a TLS proxy').to.eq(
+                `redirect=${protectedPath}; Path=/; Secure; HttpOnly; SameSite=None`,
+            )
+        })
+        // Plain http: browsers reject SameSite=None without Secure, so the valve's own cookie stays.
+        cy.request({ url: connect }).then((response) => {
+            expect(redirectCookie(response), 'redirect cookie over plain http').to.match(
+                new RegExp(`^redirect=${protectedPath};`),
+            )
+            expect(redirectCookie(response), 'redirect cookie over plain http').to.not.include('SameSite=None')
+        })
+    })
+
     it('goes straight to SAML, naming systemsite, once systemsite lists the host', () => {
         setSamlLoginProviderHosts(siteKey, EDIT_HOST.host)
 
