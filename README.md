@@ -85,6 +85,12 @@ is set up:
 | In the site's list | Straight redirect to `/home.connect.saml` (no login form) | Redirect to a public landing page instead of the referer, to avoid a silent SAML re-login |
 | Any other host of the site — including every host when the list is empty | `/saml-login`: a page identical to the standard login form, plus a "Sign in with Google" button | Standard behavior |
 
+The same applies to pages core protects with its own login redirect — `/tools`, `/modules/tools`,
+`*.raw`, `/cms/serverStats` — which send visitors to `/cms/login?redirect=<page>` directly: where
+the module acts, a visit to `/cms/login` goes on to the modified login page (or straight to SAML on
+a listed host), keeping that target. Credential posts and failed-login messages (`loginError`) still
+use the stock page.
+
 After a SAML login the user returns to the page they first asked for, also with an IdP on another
 site such as Google: the module sends the SAML valve's `redirect` cookie with `SameSite=None;
 Secure`, so the browser keeps it across the IdP's cross-site POST back to Jahia. This needs HTTPS

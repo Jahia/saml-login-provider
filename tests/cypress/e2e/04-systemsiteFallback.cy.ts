@@ -24,6 +24,17 @@ describe('Fallback to systemsite for a host no site declares', () => {
 
     const anonymousStart = () => ({ url: `${editUrl}${protectedPath}` })
 
+    /** Anonymous /tools: core's redirect to /cms/login, then where that page sends the visitor. */
+    const toolsLoginHop = () =>
+        cy.request({ url: `${editUrl}/tools`, followRedirect: false, failOnStatusCode: false }).then((tools) => {
+            expect(locationOf(tools), "core's own login redirect").to.include('/cms/login')
+            return cy.request({
+                url: new URL(locationOf(tools), editUrl).href,
+                followRedirect: false,
+                failOnStatusCode: false,
+            })
+        })
+
     before(() => {
         setUpSystemsiteForSaml()
         resetIdpUserPassword(samlPassword)
@@ -43,6 +54,22 @@ describe('Fallback to systemsite for a host no site declares', () => {
                 `${choiceLoginPath}?redirect=${encodeURIComponent(protectedPath)}`,
             )
         })
+    })
+
+    it('shows the modified login page for /tools, which core guards with its own login redirect', () => {
+        // Jahia's Shiro guard sends anonymous /tools visitors to /cms/login?redirect=/tools directly,
+        // never through the 401 page; the module catches that page instead.
+        toolsLoginHop().then((login) => {
+            expect(locationOf(login), 'core login page sent on').to.include(
+                `${choiceLoginPath}?redirect=${encodeURIComponent('/tools')}`,
+            )
+        })
+    })
+
+    it('keeps the stock login page for a failed login, so its error shows', () => {
+        cy.request({ url: `${editUrl}/cms/login?loginError=bad_password`, followRedirect: false, failOnStatusCode: false })
+            .its('status')
+            .should('not.be.oneOf', [301, 302, 303, 307])
     })
 
     it('names systemsite in the Google form, so the valve finds its connector', () => {
@@ -87,6 +114,11 @@ describe('Fallback to systemsite for a host no site declares', () => {
         requestUntil(anonymousStart(), (r) => locationOf(r).includes(samlConnectPath)).then((response) => {
             expect(locationOf(response), 'SAML connect for systemsite').to.include(
                 `${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent(protectedPath)}`,
+            )
+        })
+        toolsLoginHop().then((login) => {
+            expect(locationOf(login), '/tools straight to SAML too').to.include(
+                `${samlConnectPath}?siteKey=${siteKey}&redirect=${encodeURIComponent('/tools')}`,
             )
         })
     })

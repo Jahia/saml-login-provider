@@ -93,6 +93,13 @@ describe('SAML Login redirect behavior', () => {
             expect(locationOf(response), 'no SAML redirect').to.not.include(samlConnectPath)
             expect(locationOf(response), 'no choice page').to.not.include(choiceLoginPath)
         })
+        // ...including core's own login page, which the module only replaces where it acts.
+        cy.request({ url: '/cms/login?redirect=/tools', followRedirect: false, failOnStatusCode: false }).then(
+            (response) => {
+                expect(locationOf(response), 'stock /cms/login kept').to.not.include(choiceLoginPath)
+                expect(locationOf(response), 'stock /cms/login kept').to.not.include(samlConnectPath)
+            },
+        )
     })
 
     it('serves /saml-login with both a credentials form and a "Sign in with Google" button', () => {

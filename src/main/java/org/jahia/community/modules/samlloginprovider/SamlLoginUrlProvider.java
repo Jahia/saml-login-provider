@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import javax.servlet.RequestDispatcher;
 import javax.servlet.http.HttpServletRequest;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * Replaces the Jahia login page with the SAML connect endpoint provided by the
@@ -62,7 +63,8 @@ import java.util.Locale;
  * <p>Only the request's own site is consulted, so an administrator of one site cannot change how
  * any other site logs its visitors in.
  */
-@Component(immediate = true, service = {LoginUrlProvider.class, LogoutUrlProvider.class})
+@Component(immediate = true,
+        service = {LoginUrlProvider.class, LogoutUrlProvider.class, SamlLoginUrlProvider.class})
 public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider {
 
     /** Choice login page (credentials or Google SAML) served by {@link SamlLoginPageFilter}. */
@@ -74,8 +76,14 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
     /** Jahia logout servlet; honors a validated relative {@code redirect} parameter. */
     private static final String LOGOUT_SERVLET_PATH = "/cms/logout";
 
+    /** Jahia's own login page, which some core paths redirect to directly (see {@link CmsLoginRedirectFilter}). */
+    static final String CORE_LOGIN_PATH = "/cms/login";
+
     /** Same cap core's ErrorServlet applies to its own return URLs. */
     private static final int MAX_REDIRECT_LENGTH = 2048;
+
+    /** Printable ASCII without a backslash: what a relative post-login target may contain. */
+    private static final Pattern SAFE_TARGET_CHARS = Pattern.compile("[\\x21-\\x5B\\x5D-\\x7E]*");
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SamlLoginUrlProvider.class);
 
@@ -109,6 +117,20 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
 
     @Override
     public String getLoginUrl(HttpServletRequest request) {
+        return loginUrl(request, resolveOriginalUrl(request));
+    }
+
+    /**
+     * The login URL for a request that already names its post-login target -- core's own login page,
+     * reached as {@code /cms/login?redirect=...} (see {@link CmsLoginRedirectFilter}) -- or {@code null}
+     * where the module leaves the login alone. The target is untrusted input: anything but a plain
+     * relative path, or a login endpoint (a loop), is dropped rather than passed on.
+     */
+    public String loginUrlFor(HttpServletRequest request, String target) {
+        return loginUrl(request, isSafeTarget(target) ? target : null);
+    }
+
+    private String loginUrl(HttpServletRequest request, String originalUrl) {
         Route route = route(request);
         if (route.destination == Destination.INACTIVE) {
             // fail-safe default: null is load-bearing — LoginConfig filters
@@ -126,7 +148,6 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
             loginUrl.append(separator).append("siteKey=").append(WebUtils.urlEncode(route.explicitSiteKey));
             separator = '&';
         }
-        String originalUrl = resolveOriginalUrl(request);
         if (originalUrl != null) {
             loginUrl.append(separator).append("redirect=").append(WebUtils.urlEncode(originalUrl));
         }
@@ -198,16 +219,46 @@ public class SamlLoginUrlProvider implements LoginUrlProvider, LogoutUrlProvider
         if (uri == null) {
             return null;
         }
-        // Strip any query string a url-rewrite rule may have folded into the
-        // URI attribute before the suffix check, so /home.connect.saml?x=y
-        // still trips the SAML/choice-page loop guard.
-        int queryStart = uri.indexOf('?');
-        String uriPath = queryStart < 0 ? uri : uri.substring(0, queryStart);
-        if (uriPath.endsWith(".saml") || uriPath.endsWith(CHOICE_LOGIN_PATH)) {
+        if (isLoginEndpoint(uri)) {
             return null;
         }
         String originalUrl = (query == null || query.isEmpty()) ? uri : uri + '?' + query;
         return originalUrl.length() > MAX_REDIRECT_LENGTH ? null : originalUrl;
+    }
+
+    private static boolean isSafeTarget(String target) {
+        return target != null && target.length() <= MAX_REDIRECT_LENGTH
+                && target.startsWith("/") && !target.startsWith("//")
+                && SAFE_TARGET_CHARS.matcher(target).matches()
+                && !hasAmbiguousPath(target)
+                && !isLoginEndpoint(target);
+    }
+
+    /**
+     * A fragment, or an empty, "." or ".." segment: the container would normalize such a path, so the
+     * login-endpoint guard below could not see what it really points at -- it is dropped instead.
+     */
+    private static boolean hasAmbiguousPath(String target) {
+        int queryStart = target.indexOf('?');
+        String path = queryStart < 0 ? target : target.substring(0, queryStart);
+        return target.indexOf('#') >= 0 || path.contains("//") || path.contains("/./") || path.contains("/../")
+                || path.endsWith("/.") || path.endsWith("/..");
+    }
+
+    /**
+     * True for the SAML endpoints and the login pages, which must never become a post-login target
+     * (loop). Any query string a url-rewrite rule may have folded into a URI attribute, and any path
+     * parameter (Shiro's {@code ;jsessionid=}), is stripped first, so /home.connect.saml?x=y still
+     * trips the guard.
+     */
+    private static boolean isLoginEndpoint(String uri) {
+        int queryStart = uri.indexOf('?');
+        String path = queryStart < 0 ? uri : uri.substring(0, queryStart);
+        int parameterStart = path.indexOf(';');
+        if (parameterStart >= 0) {
+            path = path.substring(0, parameterStart);
+        }
+        return path.endsWith(".saml") || path.endsWith(CHOICE_LOGIN_PATH) || path.endsWith(CORE_LOGIN_PATH);
     }
 
     /**
