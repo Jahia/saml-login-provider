@@ -28,6 +28,7 @@ the module is enabled).
 | `SamlLoginUrlProvider` | `LoginUrlProvider`/`LogoutUrlProvider` OSGi services; routes by the site the host resolves to, only where the module is enabled and SAML is set up |
 | `SamlSetup` / `JahiaAuthSamlSetup` | Whether a site has an enabled SAML connector (`SettingsService.getConnectorConfig(site, "Saml")`, property `enabled`) |
 | `SamlLoginPageFilter` | Serves `/saml-login` (credentials form + "Sign in with Google") |
+| `CmsLoginRedirectFilter` | On `/cms/*`, for a plain `GET`/`HEAD` of `/cms/login` (path parameters stripped, no `loginError`/`username`/`restMode`/`redirectActive`): redirects to `SamlLoginUrlProvider.loginUrlFor(request, redirect)` where the provider acts. Covers core's Shiro-guarded paths, which never reach the provider |
 | `SamlRedirectCookieFilter` | On the valve's connect endpoint (registered as `*.saml` — Jahia matches `*.<ext>` on the last dot only — then filtered on the `connect.saml` suffix), just before the valve's `SAML2Filter`: writes the valve's `redirect` cookie with `SameSite=None; Secure`, so a cross-site IdP (Google) does not lose the post-login target |
 | `SiteHostsStore` / `FileSiteHostsStore` | Per-site host lists; the file-backed `ManagedServiceFactory` (factory PID `org.jahia.community.samlloginprovider.site`) that reads and atomically writes one `.cfg` per site |
 | `SiteResolver` / `JahiaSiteResolver` | Host → the ONE site declaring it, whether no site declares it (`isUnclaimed`), site → its server names and whether the module is enabled on it. Reads every site through a system session; the routing index is cached 5 s, validation reads are fresh |
@@ -147,6 +148,14 @@ yarn install
   to the next request rather than whenever FileInstall polls. The module ships no default `.cfg`.
 - `LogoutConfig` (core) only ever consults the **first** bound `LogoutUrlProvider` — this module
   assumes it is the only one deployed; do not silently rely on multiple providers cooperating.
+- **Core's Shiro guard bypasses `LoginUrlProvider`.** `/tools/**`, `/modules/tools/**`,
+  `/modules/**/*.jsp`, `*.raw`, `/cms/serverStats` are protected by Shiro (`applicationcontext-security.xml`
+  in jahia-impl, `loginUrl` hard-wired to `/cms/login`); `JahiaAuthenticationFilter.redirectToLogin`
+  redirects to `/cms/login?redirect=<uri>` itself, and an anonymous `GET /cms/login` forwards to the
+  stock `error_401.jsp` — `LoginConfig` is never consulted. `CmsLoginRedirectFilter` fixes that at the
+  `/cms/login` end. The incoming `redirect` is untrusted: `loginUrlFor` keeps only a plain relative
+  path (printable ASCII, no `\`, not `//`) and drops login endpoints, now including `/cms/login`
+  (loop). The provider is also published as `SamlLoginUrlProvider` for this filter to reference.
 - **Cross-site IdPs lose the post-login target without `SamlRedirectCookieFilter`.** The valve
   (4.1.1, `SAML2Util.storeAuthenticationContext`) keeps the validated `redirect` parameter in a
   `redirect` cookie with no `SameSite`, read back at the callback, else falls back to the

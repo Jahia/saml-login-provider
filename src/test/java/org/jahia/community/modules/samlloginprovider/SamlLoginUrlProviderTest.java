@@ -412,6 +412,67 @@ class SamlLoginUrlProviderTest {
         assertThat(provider.getLogoutUrl(request)).isNull();
     }
 
+    @Test
+    void loginUrlFor_unlistedHost_choicePageKeepingTheGivenTarget() {
+        // Arrange: e.g. core's Shiro sent /tools to /cms/login?redirect=/tools
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+
+        // Act / Assert
+        assertThat(provider.loginUrlFor(request, "/tools")).isEqualTo("/saml-login?redirect=%2Ftools");
+    }
+
+    @Test
+    void loginUrlFor_listedHostOfNoSite_straightToSamlNamingSystemsite() {
+        moduleEnabledOn.add(LoginSite.SYSTEMSITE);
+        samlConfiguredOn.add(LoginSite.SYSTEMSITE);
+        hostsBySite.put(LoginSite.SYSTEMSITE, List.of("edit.example.com"));
+        when(request.getServerName()).thenReturn("edit.example.com");
+        when(request.getContextPath()).thenReturn("/ctx");
+
+        assertThat(provider.loginUrlFor(request, "/modules/tools/index.jsp?x=1"))
+                .isEqualTo("/ctx/home.connect.saml?siteKey=systemsite&redirect=%2Fmodules%2Ftools%2Findex.jsp%3Fx%3D1");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "//evil.example.com/x", "https://evil.example.com/", "evil", "/\\evil.example.com", "/a\nb",
+            "/saml-login", "/home.connect.saml", "/cms/login", "/cms/login;jsessionid=X", "",
+            "/cms/./login", "/cms//login", "/cms/x/../login", "/cms/login#x", "/saml-login#x", "/a/.."})
+    void loginUrlFor_unsafeOrLoopingTarget_isDropped(String target) {
+        // Never an open-redirect hop, and never a login page as the post-login target (loop)
+        hostsBySite.put(SITE, List.of(LISTED_HOST));
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+
+        assertThat(provider.loginUrlFor(request, target)).isEqualTo("/saml-login");
+    }
+
+    @Test
+    void loginUrlFor_noTarget_justTheLoginPage() {
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+
+        assertThat(provider.loginUrlFor(request, null)).isEqualTo("/saml-login");
+    }
+
+    @Test
+    void loginUrlFor_tooLongTarget_isDropped() {
+        when(request.getServerName()).thenReturn(UNLISTED_HOST);
+        when(request.getContextPath()).thenReturn("");
+
+        assertThat(provider.loginUrlFor(request, "/" + "a".repeat(2048))).isEqualTo("/saml-login");
+    }
+
+    @Test
+    void loginUrlFor_inactiveHost_isNull() {
+        // A host of no qualifying site keeps the stock /cms/login page
+        when(request.getServerName()).thenReturn("unknown.example.com");
+
+        assertThat(provider.loginUrlFor(request, "/tools")).isNull();
+    }
+
     private void stubPlainRequest(String uri, String query) {
         // request.getAttribute(...) defaults to null on an unstubbed mock, matching
         // "no error dispatch / no forward" so resolution falls through to the plain branch.
