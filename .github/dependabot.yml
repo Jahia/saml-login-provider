@@ -88,6 +88,11 @@ updates:
       # Provided by the Jahia platform (8.2.x ships graphql-java-annotations 21.1)
       - dependency-name: "com.graphql-java:*"
       - dependency-name: "io.github.graphql-java:*"
+      # JUnit 6 requires Java 17; the module builds and runs on Java 11
+      - dependency-name: "org.junit.jupiter:*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.junit:*"
+        update-types: ["version-update:semver-major"]
       # frontend-maven-plugin 2.x requires a Java 17 Maven runtime
       - dependency-name: "com.github.eirslett:frontend-maven-plugin"
         update-types: ["version-update:semver-major"]
